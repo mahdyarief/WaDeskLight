@@ -3,6 +3,7 @@
 package app
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -79,7 +80,13 @@ func withAccountsLock(fn func()) {
 func readAccounts() []account {
 	var f accountsFile
 	if data, err := os.ReadFile(accountsPath()); err == nil {
-		_ = json.Unmarshal(data, &f)
+		// Notepad and PowerShell both save a BOM, which encoding/json rejects.
+		data = bytes.TrimPrefix(data, []byte{0xef, 0xbb, 0xbf})
+		if json.Unmarshal(data, &f) != nil && len(bytes.TrimSpace(data)) > 0 {
+			// Keep the unreadable file rather than overwriting it with defaults:
+			// the profile folders it names still hold real sessions.
+			_ = os.Rename(accountsPath(), accountsPath()+".bad")
+		}
 	}
 	// The default account always exists and is always first.
 	if len(f.Accounts) == 0 || f.Accounts[0].ID != defaultProfileID {

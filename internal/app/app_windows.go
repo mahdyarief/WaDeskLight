@@ -521,11 +521,13 @@ func windowProc(hwnd, msg, wp, lp uintptr) uintptr {
 		saveWindowBounds(hwnd)
 		procShowWindow.Call(hwnd, swHide)
 		setMemoryUsageTargetLevel(memoryUsageLow)
+		setEcoQoS(true)
 		go trayBalloon("WaDeskLight", "Masih berjalan di system tray. Klik ikon untuk membuka kembali.", nil)
 		return 0
 	case wmShowWindow:
 		if wp != 0 {
 			setMemoryUsageTargetLevel(memoryUsageNormal)
+			setEcoQoS(false)
 		}
 		r, _, _ := procCallWindowProcW.Call(gOldProc, hwnd, msg, wp, lp)
 		return r
@@ -591,8 +593,13 @@ func Run() int {
 	// max-old-space-size caps V8's old space. It does not free memory by
 	// itself; it makes GC run sooner. Too low a value crashes the renderer on
 	// large chat histories, so 512 MB is deliberately conservative.
+	//
+	// Do not drop --disable-gpu because it looks like a naive tweak: measured
+	// on integrated graphics, hardware compositing put ~590 MB of texture
+	// memory in the GPU process and pushed the total from 773 MB to 1440 MB.
+	// low-end-device-mode is worth about 70 MB across three runs per config.
 	_ = os.Setenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-		"--js-flags=--max-old-space-size=512 --renderer-process-limit=1 --process-per-site --disable-site-isolation-trials --disable-gpu --disable-gpu-compositing --disable-features=SitePerProcess,IsolateOrigins,OutOfProcessNetworkService,msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-background-networking --disable-component-update --no-first-run --disable-sync")
+		"--js-flags=--max-old-space-size=512 --renderer-process-limit=1 --process-per-site --disable-site-isolation-trials --disable-gpu --disable-gpu-compositing --enable-low-end-device-mode --disable-features=SitePerProcess,IsolateOrigins,OutOfProcessNetworkService,msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-background-networking --disable-component-update --no-first-run --disable-sync")
 
 	w := webview2.NewWithOptions(opts)
 	if w == nil {
@@ -608,6 +615,7 @@ func Run() int {
 	}()
 	defer w.Destroy()
 	initMemoryControl(w)
+	enableContextMenu(w)
 	audio.StartLabeler()
 
 	// Only an implicit launch reopens the accounts from the previous session;

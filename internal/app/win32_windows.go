@@ -29,8 +29,9 @@ var (
 	procGetCursorPos     = user32.NewProc("GetCursorPos")
 	procShellNotifyIcon  = shell32.NewProc("Shell_NotifyIconW")
 
-	procWaitForSingleObject = kernel32.NewProc("WaitForSingleObject")
-	procReleaseMutex        = kernel32.NewProc("ReleaseMutex")
+	procWaitForSingleObject   = kernel32.NewProc("WaitForSingleObject")
+	procReleaseMutex          = kernel32.NewProc("ReleaseMutex")
+	procSetProcessInformation = kernel32.NewProc("SetProcessInformation")
 
 	procSetWindowTextW     = user32.NewProc("SetWindowTextW")
 	procGetWindowPlacement = user32.NewProc("GetWindowPlacement")

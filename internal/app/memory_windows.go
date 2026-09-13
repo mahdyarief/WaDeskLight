@@ -3,7 +3,6 @@
 package app
 
 import (
-	"reflect"
 	"sync/atomic"
 	"syscall"
 	"unsafe"
@@ -48,35 +47,6 @@ type coreWebView219 struct {
 }
 
 var gMemoryIface atomic.Pointer[coreWebView219]
-
-// coreWebView2Ptr digs the raw ICoreWebView2 out of go-webview2, which keeps it
-// unexported and offers no accessor. Field names rather than byte offsets are
-// used, so an upstream layout change degrades to nil instead of corrupting
-// memory.
-func coreWebView2Ptr(w webview2.WebView) (ptr unsafe.Pointer) {
-	defer func() {
-		if recover() != nil {
-			ptr = nil
-		}
-	}()
-	v := reflect.ValueOf(w)
-	if v.Kind() != reflect.Pointer || v.IsNil() {
-		return nil
-	}
-	browser := v.Elem().FieldByName("browser")
-	if !browser.IsValid() || browser.Kind() != reflect.Interface || browser.IsNil() {
-		return nil
-	}
-	chromium := browser.Elem()
-	if chromium.Kind() != reflect.Pointer || chromium.IsNil() {
-		return nil
-	}
-	field := chromium.Elem().FieldByName("webview")
-	if !field.IsValid() || field.Kind() != reflect.Pointer {
-		return nil
-	}
-	return field.UnsafePointer()
-}
 
 // initMemoryControl caches ICoreWebView2_19 when the installed WebView2 Runtime
 // is new enough (1.0.1823.32+). On older runtimes QueryInterface fails and
