@@ -424,6 +424,69 @@ func spawnAccount(id string) {
 	}
 }
 
+// accountHWND finds the top-level window of another account's process by
+// its unique title. Returns 0 when that account is not running.
+func accountHWND(a account) uintptr {
+	titlePtr, _ := windows.UTF16PtrFromString(windowTitleFor(a))
+	hwnd, _, _ := procFindWindow.Call(0, uintptr(unsafe.Pointer(titlePtr)))
+	return hwnd
+}
+
+// showOnlyAccount implements tabs mode: only the named account stays
+// visible, every other running account window is hidden. The choice is
+// persisted so every window renders the same active tab.
+func showOnlyAccount(id string) {
+	p := loadPrefs()
+	p.ActiveID = id
+	savePrefs(p)
+	for _, a := range loadAccounts() {
+		hwnd := accountHWND(a)
+		if hwnd == 0 {
+			continue
+		}
+		if a.ID == id {
+			procShowWindow.Call(hwnd, swRestore)
+			procSetFgWindow.Call(hwnd)
+		} else {
+			procShowWindow.Call(hwnd, swHide)
+		}
+	}
+}
+
+// showAllAccounts implements pages mode: every running account window is
+// made visible. Positioning is left to the user (and Windows).
+func showAllAccounts() {
+	for _, a := range loadAccounts() {
+		if hwnd := accountHWND(a); hwnd != 0 {
+			procShowWindow.Call(hwnd, swRestore)
+		}
+	}
+}
+
+// selectAccount is the tab click path: in tabs mode it hides the other
+// windows, in pages mode it just brings the target forward.
+func selectAccount(from uintptr, a account) {
+	if loadPrefs().ViewMode == ViewPages {
+		focusAccount(from, a)
+		return
+	}
+	target := accountHWND(a)
+	if target != 0 {
+		st, _ := captureWindowState(from)
+		applyWindowState(target, st)
+		showOnlyAccount(a.ID)
+		return
+	}
+	// Not running yet: remember the choice, leave geometry for first paint.
+	p := loadPrefs()
+	p.ActiveID = a.ID
+	savePrefs(p)
+	if st, _ := captureWindowState(from); st.Saved {
+		saveWindowStateTo(windowStatePathFor(a.ID), st)
+	}
+	spawnAccount(a.ID)
+}
+
 // focusAccount brings another account's window forward, starting it if it is
 // not running yet.
 func focusAccount(from uintptr, a account) {
@@ -655,7 +718,15 @@ func Run() int {
 	_ = w.Bind("wadeskAccountSwitch", func(id string) {
 		for _, a := range loadAccounts() {
 			if a.ID == id && a.ID != gProfileID {
-				focusAccount(hwnd, a)
+				selectAccount(hwnd, a)
+				return
+			}
+		}
+	})
+	_ = w.Bind("wadeskTabSelect", func(id string) {
+		for _, a := range loadAccounts() {
+			if a.ID == id {
+				selectAccount(hwnd, a)
 				return
 			}
 		}
@@ -673,10 +744,16 @@ func Run() int {
 		p := loadPrefs()
 		if mode == string(ViewPages) {
 			p.ViewMode = ViewPages
+			savePrefs(p)
+			showAllAccounts()
 		} else {
 			p.ViewMode = ViewTabs
+			if p.ActiveID == "" {
+				p.ActiveID = gProfileID
+			}
+			savePrefs(p)
+			showOnlyAccount(p.ActiveID)
 		}
-		savePrefs(p)
 	})
 	_ = w.Bind("wadeskAccountRename", func(id, name string) {
 		renameAccount(id, name)

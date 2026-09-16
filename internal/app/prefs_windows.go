@@ -19,6 +19,8 @@ const (
 
 type prefs struct {
 	ViewMode ViewMode `json:"viewMode"`
+	// ActiveID is the account shown in tabs mode. Empty means current.
+	ActiveID string `json:"activeAccount,omitempty"`
 	// Lite keeps the low-memory flags and eco-QoS behaviour on.
 	// It defaults to true and exists so a future settings UI can toggle it.
 	Lite bool `json:"lite"`
