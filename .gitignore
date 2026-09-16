@@ -1,11 +1,11 @@
 # Build outputs
-WhatsApp.exe
+WaGramDeskLite.exe
 dist/
 build/rsrc_windows_amd64.syso
 build/extract_test/
 
 # Inno Setup installer
-WaDeskLightSetup.exe
+WaGramDeskLiteSetup.exe
 
 # Windows junk
 *.tmp

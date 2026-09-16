@@ -17,13 +17,13 @@ import (
 	"github.com/jchv/go-webview2"
 	"golang.org/x/sys/windows"
 
-	"wadesklight/internal/audio"
+	"wagramdesklite/internal/audio"
 )
 
 const (
 	windowTitle = "WaGram Desk Lite"
 	appURL      = "https://web.whatsapp.com"
-	mutexName   = "WaDeskLightSingleInstanceMutex"
+	mutexName   = "WaGramDeskLiteSingleInstanceMutex"
 	userAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
 )
 
@@ -151,7 +151,7 @@ func getConfigDir() string {
 			configDir = "."
 		}
 	}
-	dir := filepath.Join(configDir, "WaDeskLight")
+	dir := filepath.Join(configDir, "WaGramDeskLite")
 	_ = os.MkdirAll(dir, 0755)
 	return dir
 }
@@ -550,7 +550,7 @@ func installWindowSubclass(hwnd uintptr) {
 	gOldProc, _, _ = procSetWindowLongPtr.Call(hwnd, uintptr(gwlpWndProc), gWinProc)
 }
 
-// Run starts the WaDeskLight window and blocks until the app exits.
+// Run starts the WaGramDeskLite window and blocks until the app exits.
 // It returns the process exit code.
 func Run() int {
 	profileID, explicit := profileFromArgs()

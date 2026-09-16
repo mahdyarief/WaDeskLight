@@ -21,7 +21,7 @@ import (
 // paired before multi-account support survive the upgrade.
 const defaultProfileID = "default"
 
-const accountsMutexName = "WaDeskLightAccountsMutex"
+const accountsMutexName = "WaGramDeskLiteAccountsMutex"
 
 type account struct {
 	ID   string `json:"id"`

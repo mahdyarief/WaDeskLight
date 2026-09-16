@@ -78,7 +78,7 @@ const accountOverlayScript = `
 	function mount() {
 		if (host && document.documentElement.contains(host)) { return; }
 		host = document.createElement('div');
-		host.setAttribute('data-wadesklight', 'accounts');
+		host.setAttribute('data-wagramdesklite', 'accounts');
 		// The host lives in WhatsApp's light DOM, so its own box must be pinned
 		// down explicitly; page rules could otherwise hide it and take the
 		// shadow content with it.
