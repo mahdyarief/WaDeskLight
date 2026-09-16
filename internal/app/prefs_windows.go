@@ -24,9 +24,11 @@ type prefs struct {
 	// Notifications toggles message popup balloons. Nil means on (default),
 	// so prefs.json files written before this setting existed stay enabled.
 	Notifications *bool `json:"notifications,omitempty"`
-	// Lite keeps the low-memory flags and eco-QoS behaviour on.
-	// It defaults to true and exists so a future settings UI can toggle it.
-	Lite bool `json:"lite"`
+	// Lite keeps the low-memory and eco-QoS behaviour on: WebView2 drops to
+	// its low memory target while the window is hidden and once it has been
+	// left untouched. Nil means on (default), same as Notifications, so files
+	// written before the setting existed keep the original behaviour.
+	Lite *bool `json:"lite,omitempty"`
 }
 
 func prefsPath() string {
@@ -34,7 +36,7 @@ func prefsPath() string {
 }
 
 func defaultPrefs() prefs {
-	return prefs{ViewMode: ViewTabs, Lite: true}
+	return prefs{ViewMode: ViewTabs}
 }
 
 func notificationsEnabled(p prefs) bool {
@@ -44,6 +46,15 @@ func notificationsEnabled(p prefs) bool {
 func setNotificationsEnabled(p *prefs, on bool) {
 	v := on
 	p.Notifications = &v
+}
+
+func liteEnabled(p prefs) bool {
+	return p.Lite == nil || *p.Lite
+}
+
+func setLiteEnabled(p *prefs, on bool) {
+	v := on
+	p.Lite = &v
 }
 
 func loadPrefs() prefs {

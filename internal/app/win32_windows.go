@@ -28,6 +28,9 @@ var (
 	procDestroyMenu      = user32.NewProc("DestroyMenu")
 	procGetCursorPos     = user32.NewProc("GetCursorPos")
 	procShellNotifyIcon  = shell32.NewProc("Shell_NotifyIconW")
+	procSetTimer         = user32.NewProc("SetTimer")
+	procIsWindowVisible  = user32.NewProc("IsWindowVisible")
+	procPostMessageW     = user32.NewProc("PostMessageW")
 
 	procWaitForSingleObject   = kernel32.NewProc("WaitForSingleObject")
 	procReleaseMutex          = kernel32.NewProc("ReleaseMutex")
@@ -54,13 +57,24 @@ const (
 
 	// Win32 messages
 	wmClose             = 0x0010
+	wmActivate          = 0x0006
+	wmKeyDown           = 0x0100
+	wmLButtonDown       = 0x0201
 	wmLButtonUp         = 0x0202
 	wmRButtonUp         = 0x0205
 	wmLButtonDblClk     = 0x0203
+	wmMouseMove         = 0x0200
+	wmTimer             = 0x0113
 	wmShowWindow        = 0x0018
 	wmApp               = 0x8000
 	wmTrayCallback      = wmApp + 1
 	ninBalloonUserClick = wmApp + 5
+	// wmApplyLite is posted from the JS binding, which may run off the UI
+	// thread, to re-evaluate the low-memory setting where it is legal to.
+	wmApplyLite = wmApp + 6
+
+	// Idle timer that drops WebView2 to its low memory target.
+	timerIdle = 1
 
 	// ShowWindow commands
 	swHide          = 0
@@ -96,10 +110,11 @@ const (
 	mfSeparator  = 0x0800
 	mfChecked    = 0x0008
 
-	menuOpen = 1
-	menuExit = 2
-	menuAdd  = 3
+	menuOpen  = 1
+	menuExit  = 2
+	menuAdd   = 3
 	menuNotif = 4
+	menuLite  = 5
 	// Account entries occupy menuAccountBase + index.
 	menuAccountBase = 100
 

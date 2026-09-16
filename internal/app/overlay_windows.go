@@ -83,6 +83,14 @@ const accountOverlayScript = `
 		return true;
 	}
 
+	function liteOf() {
+		if (state && state.prefs) {
+			if (typeof state.prefs.lite === 'boolean') { return state.prefs.lite; }
+			if (typeof state.prefs.Lite === 'boolean') { return state.prefs.Lite; }
+		}
+		return true;
+	}
+
 	function mount() {
 		if (host && document.documentElement.contains(host)) { return; }
 		host = document.createElement('div');
@@ -285,6 +293,24 @@ const accountOverlayScript = `
 			render();
 		});
 		panel.appendChild(notif);
+
+		var liteOn = liteOf();
+		var lite = el('div', 'viewrow');
+		lite.appendChild(el('span', 'gl', liteOn ? '☾' : '☀'));
+		lite.appendChild(el('span', 'nm', liteOn ? 'Lite: On (shed memory when idle)' : 'Lite: Off (always full speed)'));
+		lite.addEventListener('click', function () {
+			var next = !liteOn;
+			if (typeof window.wadeskLiteSet === 'function') {
+				window.wadeskLiteSet(next).then(function () { setTimeout(refresh, 80); });
+			}
+			if (state && state.prefs) {
+				if ('lite' in state.prefs) { state.prefs.lite = next; }
+				state.prefs.Lite = next;
+			}
+			liteOn = next;
+			render();
+		});
+		panel.appendChild(lite);
 
 		var ren = el('div', 'act');
 		ren.appendChild(el('span', 'gl', '✎'));
