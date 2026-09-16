@@ -191,7 +191,7 @@ const accountOverlayScript = `
 	function renderTabbar() {
 		var old = root && root.querySelector('.tabbar');
 		if (old) { old.remove(); }
-		if (!state || prefsOf() !== 'tabs') { return; }
+		if (!state) { return; }
 		var accounts = state.accounts || [];
 		if (accounts.length < 2) { return; }
 		var active = activeIdOf();
