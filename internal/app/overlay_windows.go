@@ -75,6 +75,14 @@ const accountOverlayScript = `
 		return 'tabs';
 	}
 
+	function notifOf() {
+		if (state && state.prefs) {
+			if (typeof state.prefs.notifications === 'boolean') { return state.prefs.notifications; }
+			if (typeof state.prefs.Notifications === 'boolean') { return state.prefs.Notifications; }
+		}
+		return true;
+	}
+
 	function mount() {
 		if (host && document.documentElement.contains(host)) { return; }
 		host = document.createElement('div');
@@ -259,6 +267,24 @@ const accountOverlayScript = `
 			render();
 		});
 		panel.appendChild(toggle);
+
+		var notifOn = notifOf();
+		var notif = el('div', 'viewrow');
+		notif.appendChild(el('span', 'gl', notifOn ? '🔔' : '🔕'));
+		notif.appendChild(el('span', 'nm', notifOn ? 'Notifications: On (turn off)' : 'Notifications: Off (turn on)'));
+		notif.addEventListener('click', function () {
+			var next = !notifOn;
+			if (typeof window.wadeskNotificationsSet === 'function') {
+				window.wadeskNotificationsSet(next).then(function () { setTimeout(refresh, 80); });
+			}
+			if (state && state.prefs) {
+				if ('notifications' in state.prefs) { state.prefs.notifications = next; }
+				state.prefs.Notifications = next;
+			}
+			notifOn = next;
+			render();
+		});
+		panel.appendChild(notif);
 
 		var ren = el('div', 'act');
 		ren.appendChild(el('span', 'gl', '✎'));

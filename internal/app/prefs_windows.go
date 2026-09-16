@@ -21,6 +21,9 @@ type prefs struct {
 	ViewMode ViewMode `json:"viewMode"`
 	// ActiveID is the account shown in tabs mode. Empty means current.
 	ActiveID string `json:"activeAccount,omitempty"`
+	// Notifications toggles message popup balloons. Nil means on (default),
+	// so prefs.json files written before this setting existed stay enabled.
+	Notifications *bool `json:"notifications,omitempty"`
 	// Lite keeps the low-memory flags and eco-QoS behaviour on.
 	// It defaults to true and exists so a future settings UI can toggle it.
 	Lite bool `json:"lite"`
@@ -32,6 +35,15 @@ func prefsPath() string {
 
 func defaultPrefs() prefs {
 	return prefs{ViewMode: ViewTabs, Lite: true}
+}
+
+func notificationsEnabled(p prefs) bool {
+	return p.Notifications == nil || *p.Notifications
+}
+
+func setNotificationsEnabled(p *prefs, on bool) {
+	v := on
+	p.Notifications = &v
 }
 
 func loadPrefs() prefs {

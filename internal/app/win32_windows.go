@@ -99,6 +99,7 @@ const (
 	menuOpen = 1
 	menuExit = 2
 	menuAdd  = 3
+	menuNotif = 4
 	// Account entries occupy menuAccountBase + index.
 	menuAccountBase = 100
 

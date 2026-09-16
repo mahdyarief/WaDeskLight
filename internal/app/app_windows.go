@@ -549,6 +549,11 @@ func showTrayMenu(hwnd uintptr) {
 
 	procAppendMenuW.Call(menu, mfSeparator, 0, 0)
 	procAppendMenuW.Call(menu, 0, menuAdd, strPtr("Add Account"))
+	notifFlags := uintptr(0)
+	if notificationsEnabled(loadPrefs()) {
+		notifFlags = mfChecked
+	}
+	procAppendMenuW.Call(menu, notifFlags, menuNotif, strPtr("Pop-up Notifications"))
 	procAppendMenuW.Call(menu, mfSeparator, 0, 0)
 	procAppendMenuW.Call(menu, 0, menuExit, strPtr("Exit"))
 
@@ -566,6 +571,10 @@ func showTrayMenu(hwnd uintptr) {
 		quitInstance(hwnd)
 	case cmd == menuAdd:
 		focusAccount(hwnd, addAccount())
+	case cmd == menuNotif:
+		p := loadPrefs()
+		setNotificationsEnabled(&p, !notificationsEnabled(p))
+		savePrefs(p)
 	case cmd >= menuAccountBase:
 		if i := int(cmd) - menuAccountBase; i < len(accounts) {
 			if accounts[i].ID == gProfileID {
@@ -703,8 +712,16 @@ func Run() int {
 
 	w.SetTitle(gWindowTitle)
 	_ = w.Bind("sendNativeNotification", func(title, body, iconDataURL string) {
+		if !notificationsEnabled(loadPrefs()) {
+			return
+		}
 		icon := decodeDataURL(iconDataURL)
 		go trayBalloon(title, body, icon)
+	})
+	_ = w.Bind("wadeskNotificationsSet", func(on bool) {
+		p := loadPrefs()
+		setNotificationsEnabled(&p, on)
+		savePrefs(p)
 	})
 
 	type accountsView struct {
