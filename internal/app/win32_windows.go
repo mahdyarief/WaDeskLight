@@ -2,7 +2,18 @@
 
 package app
 
-import "golang.org/x/sys/windows"
+import (
+	"unsafe"
+
+	"golang.org/x/sys/windows"
+)
+
+// strPtr returns a pointer to a NUL-terminated UTF-16 copy of s, for the Win32
+// calls that take an LPCWSTR.
+func strPtr(s string) uintptr {
+	p, _ := windows.UTF16PtrFromString(s)
+	return uintptr(unsafe.Pointer(p))
+}
 
 var (
 	kernel32 = windows.NewLazySystemDLL("kernel32.dll")
