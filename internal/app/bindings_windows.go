@@ -21,13 +21,13 @@ func registerBindings(w webview2.WebView, hwnd uintptr) {
 		icon := decodeDataURL(iconDataURL)
 		go trayBalloon(title, body, icon)
 	})
-	_ = w.Bind("wadeskNotificationsSet", func(on bool) {
+	_ = w.Bind("wagramNotificationsSet", func(on bool) {
 		p := loadPrefs()
 		setNotificationsEnabled(&p, on)
 		savePrefs(p)
 		setNotificationPermission(on)
 	})
-	_ = w.Bind("wadeskLiteSet", func(on bool) {
+	_ = w.Bind("wagramLiteSet", func(on bool) {
 		p := loadPrefs()
 		setLiteEnabled(&p, on)
 		savePrefs(p)
@@ -36,10 +36,10 @@ func registerBindings(w webview2.WebView, hwnd uintptr) {
 		procPostMessageW.Call(hwnd, wmApplyLite, 0, 0)
 	})
 
-	_ = w.Bind("wadeskAccountsState", func() accountsView {
+	_ = w.Bind("wagramAccountsState", func() accountsView {
 		return accountsView{Current: gProfileID, Accounts: loadAccounts(), Prefs: loadPrefs()}
 	})
-	_ = w.Bind("wadeskAccountSwitch", func(id string) {
+	_ = w.Bind("wagramAccountSwitch", func(id string) {
 		for _, a := range loadAccounts() {
 			if a.ID == id && a.ID != gProfileID {
 				selectAccount(hwnd, a)
@@ -47,24 +47,13 @@ func registerBindings(w webview2.WebView, hwnd uintptr) {
 			}
 		}
 	})
-	_ = w.Bind("wadeskTabSelect", func(id string) {
-		for _, a := range loadAccounts() {
-			if a.ID == id {
-				selectAccount(hwnd, a)
-				return
-			}
-		}
-	})
-	_ = w.Bind("wadeskAccountAdd", func() {
+	_ = w.Bind("wagramAccountAdd", func() {
 		focusAccount(hwnd, addAccount())
 	})
-	_ = w.Bind("wadeskAccountAddService", func(svc string) {
+	_ = w.Bind("wagramAccountAddService", func(svc string) {
 		focusAccount(hwnd, addServiceAccount(Service(svc)))
 	})
-	_ = w.Bind("wadeskPrefsGet", func() prefs {
-		return loadPrefs()
-	})
-	_ = w.Bind("wadeskPrefsSet", func(mode string) {
+	_ = w.Bind("wagramPrefsSet", func(mode string) {
 		p := loadPrefs()
 		if mode == string(ViewPages) {
 			p.ViewMode = ViewPages
@@ -79,7 +68,7 @@ func registerBindings(w webview2.WebView, hwnd uintptr) {
 			showOnlyAccount(p.ActiveID)
 		}
 	})
-	_ = w.Bind("wadeskAccountRename", func(id, name string) {
+	_ = w.Bind("wagramAccountRename", func(id, name string) {
 		renameAccount(id, name)
 		if id == gProfileID {
 			w.Dispatch(func() { applyAccountName(hwnd, accountFor(id)) })
@@ -87,7 +76,7 @@ func registerBindings(w webview2.WebView, hwnd uintptr) {
 	})
 	// Only the account you are looking at can be removed: another instance owns
 	// its own window and files, and has no channel to be told to shut down.
-	_ = w.Bind("wadeskAccountRemove", func(id string) {
+	_ = w.Bind("wagramAccountRemove", func(id string) {
 		if id != gProfileID || id == defaultProfileID {
 			return
 		}

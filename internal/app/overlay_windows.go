@@ -7,7 +7,7 @@ package app
 // re-renders cannot reach it and ours cannot leak into the page.
 const accountOverlayScript = `
 (function () {
-	if (typeof window.wadeskAccountsState !== 'function') { return; }
+	if (typeof window.wagramAccountsState !== 'function') { return; }
 
 	var CSS = [
 		'.btn { position: fixed; left: 12px; bottom: 14px; width: 38px; height: 38px;',
@@ -121,7 +121,7 @@ const accountOverlayScript = `
 	}
 
 	function refresh() {
-		return window.wadeskAccountsState().then(function (s) {
+		return window.wagramAccountsState().then(function (s) {
 			state = s;
 			render();
 		}).catch(function () {});
@@ -234,7 +234,7 @@ const accountOverlayScript = `
 			row.appendChild(badge);
 			if (!isCurrent) {
 				row.addEventListener('click', function () {
-					window.wadeskAccountSwitch(a.id);
+					window.wagramAccountSwitch(a.id);
 					open = false;
 					render();
 				});
@@ -249,10 +249,10 @@ const accountOverlayScript = `
 			add.appendChild(el('span', 'gl', '+'));
 			add.appendChild(el('span', 'nm', t[1]));
 			add.addEventListener('click', function () {
-				if (typeof window.wadeskAccountAddService === 'function') {
-					window.wadeskAccountAddService(t[0]);
+				if (typeof window.wagramAccountAddService === 'function') {
+					window.wagramAccountAddService(t[0]);
 				} else {
-					window.wadeskAccountAdd();
+					window.wagramAccountAdd();
 				}
 				open = false;
 				render();
@@ -265,8 +265,8 @@ const accountOverlayScript = `
 		toggle.appendChild(el('span', 'nm', view === 'pages' ? 'View: Pages (switch to Tabs)' : 'View: Tabs (switch to Pages)'));
 		toggle.addEventListener('click', function () {
 			var next = view === 'pages' ? 'tabs' : 'pages';
-			if (typeof window.wadeskPrefsSet === 'function') {
-				window.wadeskPrefsSet(next).then(function () { setTimeout(refresh, 80); });
+			if (typeof window.wagramPrefsSet === 'function') {
+				window.wagramPrefsSet(next).then(function () { setTimeout(refresh, 80); });
 			}
 			if (state && state.prefs) {
 				if ('viewMode' in state.prefs) { state.prefs.viewMode = next; }
@@ -282,8 +282,8 @@ const accountOverlayScript = `
 		notif.appendChild(el('span', 'nm', notifOn ? 'Notifications: On (turn off)' : 'Notifications: Off (turn on)'));
 		notif.addEventListener('click', function () {
 			var next = !notifOn;
-			if (typeof window.wadeskNotificationsSet === 'function') {
-				window.wadeskNotificationsSet(next).then(function () { setTimeout(refresh, 80); });
+			if (typeof window.wagramNotificationsSet === 'function') {
+				window.wagramNotificationsSet(next).then(function () { setTimeout(refresh, 80); });
 			}
 			if (state && state.prefs) {
 				if ('notifications' in state.prefs) { state.prefs.notifications = next; }
@@ -300,8 +300,8 @@ const accountOverlayScript = `
 		lite.appendChild(el('span', 'nm', liteOn ? 'Lite: On (shed memory when idle)' : 'Lite: Off (always full speed)'));
 		lite.addEventListener('click', function () {
 			var next = !liteOn;
-			if (typeof window.wadeskLiteSet === 'function') {
-				window.wadeskLiteSet(next).then(function () { setTimeout(refresh, 80); });
+			if (typeof window.wagramLiteSet === 'function') {
+				window.wagramLiteSet(next).then(function () { setTimeout(refresh, 80); });
 			}
 			if (state && state.prefs) {
 				if ('lite' in state.prefs) { state.prefs.lite = next; }
@@ -337,7 +337,7 @@ const accountOverlayScript = `
 
 		var commit = function () {
 			var name = input.value.trim();
-			if (name) { window.wadeskAccountRename(state.current, name); }
+			if (name) { window.wagramAccountRename(state.current, name); }
 			mode = 'list';
 			setTimeout(refresh, 80);
 		};
@@ -366,7 +366,7 @@ const accountOverlayScript = `
 		var cancel = el('button', '', 'Cancel');
 		cancel.addEventListener('click', function () { mode = 'list'; render(); });
 		var go = el('button', 'go danger', 'Remove');
-		go.addEventListener('click', function () { window.wadeskAccountRemove(state.current); });
+		go.addEventListener('click', function () { window.wagramAccountRemove(state.current); });
 		btns.appendChild(cancel);
 		btns.appendChild(go);
 		panel.appendChild(btns);
@@ -386,23 +386,58 @@ const accountOverlayScript = `
 		try {
 			mount();
 			refresh();
+			watch();
 		} catch (e) {
-			// Retried by the tick below.
+			// <html> may not exist yet at document-created time; the
+			// DOMContentLoaded handler below calls this again.
 		}
 	}
 
 	window.addEventListener('resize', reanchor);
 
-	// The script runs before the parser has built <html>, a hard navigation
-	// discards what we appended, and the rail shifts as WhatsApp loads, so both
-	// are re-checked on a slow tick.
-	setInterval(function () {
-		if (!host || !document.documentElement || !document.documentElement.contains(host)) {
+	var railEl = null, railResize = null, watching = false;
+
+	function trackTheRail() {
+		if (!document.documentElement || !document.documentElement.contains(host)) {
 			boot();
-		} else {
-			reanchor();
 		}
-	}, 1000);
+		var rail = document.querySelector('[data-testid="navbar-footer-section"]');
+		if (rail === railEl) { return; }
+		railEl = rail;
+		if (rail && railResize) {
+			railResize.disconnect();
+			railResize.observe(rail);
+		}
+		reanchor();
+	}
+
+	// The rail we sit above is React-owned and gets replaced whenever the chat
+	// list is rebuilt, so the anchor follows the element rather than a position.
+	// A subtree observer sees every one of those mutations, but its callback is
+	// an identity compare behind a throttle, so a churning page costs a few
+	// cheap checks a second and a quiet page costs nothing at all. That is the
+	// property a setInterval could not have.
+	function watch() {
+		if (watching || !document.documentElement) { return; }
+		watching = true;
+		if (typeof ResizeObserver !== 'undefined') {
+			railResize = new ResizeObserver(reanchor);
+		}
+		if (typeof MutationObserver !== 'undefined') {
+			var lastCheck = 0;
+			new MutationObserver(function () {
+				var now = Date.now();
+				if (now - lastCheck < 250) { return; }
+				lastCheck = now;
+				trackTheRail();
+			}).observe(document.body || document.documentElement, { childList: true, subtree: true });
+
+			// Our host is a direct child of <html>, so a hard navigation that
+			// replaces the document's children is outside the observer above.
+			new MutationObserver(trackTheRail).observe(document.documentElement, { childList: true });
+		}
+		trackTheRail();
+	}
 
 	if (document.readyState === 'loading') {
 		document.addEventListener('DOMContentLoaded', boot);

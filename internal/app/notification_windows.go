@@ -136,5 +136,32 @@ const notificationPolyfillJS = `		// Native Notification Polyfill for Windows Tr
 					return Promise.resolve();
 				};
 			}
+
+			// Telegram Web hands its popups to the service worker over
+			// postMessage, and the worker calls self.registration.
+			// showNotification from inside its own global scope. None of the
+			// patches above exist there: a document-created script never runs
+			// in a worker. Catching the outgoing message is the only place on
+			// this side of the boundary where the popup is still visible.
+			if (typeof ServiceWorker !== 'undefined' &&
+				ServiceWorker.prototype &&
+				ServiceWorker.prototype.postMessage) {
+				var realPostMessage = ServiceWorker.prototype.postMessage;
+				ServiceWorker.prototype.postMessage = function(message, transfer) {
+					try {
+						if (message && message.type === 'showMessageNotification') {
+							var payload = message.payload || {};
+							// Telegram marks silent notifications so a muted
+							// chat still updates the badge without a popup.
+							if (!payload.isSilent) {
+								deliver(payload.title, payload.body, payload.icon);
+							}
+						}
+					} catch (e) {}
+					// Still deliver to the worker: it keeps the notification
+					// tag bookkeeping that later closes them by chat.
+					return realPostMessage.call(this, message, transfer);
+				};
+			}
 		})();
 `

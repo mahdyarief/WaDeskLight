@@ -16,11 +16,29 @@ import (
 
 const (
 	th32csSnapProcess = 0x00000002
+
+	// fastScan is the session scan interval right after a session this process
+	// has not seen before shows up. One scan is a handful of in-process COM
+	// calls and a lookup, not a walk of the machine.
+	fastScan = 2 * time.Second
+	// slowScan is the interval once several scans in a row turned up nothing
+	// new. A session created during this window keeps its default name in the
+	// volume mixer until the next scan.
+	slowScan = 15 * time.Second
+	// quietScansBeforeSlow is how many consecutive fruitless scans it takes to
+	// drop back to slowScan.
+	quietScansBeforeSlow = 8
 )
 
-// StartLabeler periodically renames the audio sessions of the WebView2
-// renderer processes owned by the current process to "WhatsApp", so the
-// WhatsApp audio appears under that name in the Windows volume mixer.
+// StartLabeler renames the audio sessions belonging to this process's WebView2
+// renderers to "WhatsApp", so the app's audio appears under that name in the
+// Windows volume mixer.
+//
+// The scan is deliberately lopsided. It enumerates audio sessions on every
+// tick, but only walks the system process table when a session names a process
+// it has not classified yet. That walk is a snapshot of every process on the
+// machine, and running it every two seconds for the life of the app was the
+// expensive half of the loop this replaced.
 func StartLabeler() {
 	go func() {
 		runtime.LockOSThread()
@@ -31,19 +49,90 @@ func StartLabeler() {
 		}
 		defer ole.CoUninitialize()
 
+		var (
+			enumerator *wca.IMMDeviceEnumerator
+			device     *wca.IMMDevice
+			manager    *wca.IAudioSessionManager2
+		)
+		releaseMixer := func() {
+			if manager != nil {
+				manager.Release()
+			}
+			if device != nil {
+				device.Release()
+			}
+			if enumerator != nil {
+				enumerator.Release()
+			}
+			manager, device, enumerator = nil, nil, nil
+		}
+		defer releaseMixer()
+
+		// ours is the set of WebView2 PIDs under this process. seen is the
+		// session PIDs from the previous scan, which is how a genuinely new
+		// session is told apart from one that has been there all along.
+		var ours map[uint32]bool
+		seen := map[uint32]bool{}
+		quiet := 0
+
 		for {
-			labelAudioSessions()
-			time.Sleep(2 * time.Second)
+			if manager == nil {
+				enumerator, device, manager = openMixer()
+				if manager == nil {
+					time.Sleep(slowScan)
+					continue
+				}
+			}
+
+			sessions, err := collectSessions(manager)
+			if err != nil {
+				// The endpoint went away: device switch or driver restart.
+				releaseMixer()
+				time.Sleep(fastScan)
+				continue
+			}
+
+			current := make(map[uint32]bool, len(sessions))
+			fresh := false
+			for _, s := range sessions {
+				current[s.pid] = true
+				if !seen[s.pid] {
+					fresh = true
+				}
+			}
+			seen = current
+
+			if fresh {
+				ours = waGramDeskLiteWebViewProcesses(uint32(syscall.Getpid()))
+			}
+			for _, s := range sessions {
+				if ours[s.pid] {
+					name := "WhatsApp"
+					_ = s.control.SetDisplayName(&name, nil)
+				}
+				s.control.Release()
+			}
+
+			if fresh {
+				quiet = 0
+				time.Sleep(fastScan)
+				continue
+			}
+			quiet++
+			if quiet >= quietScansBeforeSlow {
+				time.Sleep(slowScan)
+			} else {
+				time.Sleep(fastScan)
+			}
 		}
 	}()
 }
 
-func labelAudioSessions() {
-	processIDs := waGramDeskLiteWebViewProcesses(uint32(syscall.Getpid()))
-	if len(processIDs) == 0 {
-		return
-	}
-
+// openMixer activates the session manager for the current default playback
+// device. The handles are held for the life of the process: they only change
+// when the default device does, so rebuilding them on every tick was COM churn
+// for a result that almost never changed.
+func openMixer() (*wca.IMMDeviceEnumerator, *wca.IMMDevice, *wca.IAudioSessionManager2) {
 	var enumerator *wca.IMMDeviceEnumerator
 	if err := wca.CoCreateInstance(
 		wca.CLSID_MMDeviceEnumerator,
@@ -52,33 +141,44 @@ func labelAudioSessions() {
 		wca.IID_IMMDeviceEnumerator,
 		&enumerator,
 	); err != nil {
-		return
+		return nil, nil, nil
 	}
-	defer enumerator.Release()
 
 	var device *wca.IMMDevice
 	if err := enumerator.GetDefaultAudioEndpoint(wca.ERender, wca.DEVICE_STATE_ACTIVE, &device); err != nil {
-		return
+		enumerator.Release()
+		return nil, nil, nil
 	}
-	defer device.Release()
 
 	var manager *wca.IAudioSessionManager2
 	if err := device.Activate(wca.IID_IAudioSessionManager2, wca.CLSCTX_INPROC_SERVER, nil, &manager); err != nil {
-		return
+		device.Release()
+		enumerator.Release()
+		return nil, nil, nil
 	}
-	defer manager.Release()
+	return enumerator, device, manager
+}
 
+type audioSession struct {
+	control *wca.IAudioSessionControl2
+	pid     uint32
+}
+
+// collectSessions enumerates the current audio sessions. The caller owns the
+// returned control pointers and must release each one.
+func collectSessions(manager *wca.IAudioSessionManager2) ([]audioSession, error) {
 	var sessions *wca.IAudioSessionEnumerator
 	if err := manager.GetSessionEnumerator(&sessions); err != nil {
-		return
+		return nil, err
 	}
 	defer sessions.Release()
 
 	var count int
 	if err := sessions.GetCount(&count); err != nil {
-		return
+		return nil, err
 	}
 
+	found := make([]audioSession, 0, count)
 	for i := 0; i < count; i++ {
 		var control *wca.IAudioSessionControl
 		if err := sessions.GetSession(i, &control); err != nil || control == nil {
@@ -90,16 +190,16 @@ func labelAudioSessions() {
 			control.Release()
 			continue
 		}
-
-		var processID uint32
-		if err := control2.GetProcessId(&processID); err == nil && processIDs[processID] {
-			name := "WhatsApp"
-			_ = control2.SetDisplayName(&name, nil)
-		}
-
-		control2.Release()
 		control.Release()
+
+		var pid uint32
+		if err := control2.GetProcessId(&pid); err != nil {
+			control2.Release()
+			continue
+		}
+		found = append(found, audioSession{control: control2, pid: pid})
 	}
+	return found, nil
 }
 
 func waGramDeskLiteWebViewProcesses(rootPID uint32) map[uint32]bool {
