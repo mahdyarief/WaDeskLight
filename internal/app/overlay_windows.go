@@ -32,6 +32,17 @@ const accountOverlayScript = `
 		'.act:hover { background: #2a3942; }',
 		'.act.danger:hover { background: #3c2226; color: #f15c6d; }',
 		'.gl { width: 14px; text-align: center; color: #8696a0; }',
+		'.badge { font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px;',
+		'  background: #2a3942; color: #00a884; margin-left: auto; }',
+		'.badge.tg { color: #37aee2; }',
+		'.tabs { display: flex; gap: 4px; padding: 4px; }',
+		'.tabs button { flex: 1; padding: 6px 4px; border-radius: 6px; border: 1px solid #2a3942;',
+		'  background: #202c33; color: #8696a0; cursor: pointer;',
+		'  font: 500 12px system-ui, sans-serif; }',
+		'.tabs button.on { background: #2a3942; color: #e9edef; }',
+		'.viewrow { display: flex; align-items: center; gap: 8px; padding: 8px 10px;',
+		'  border-radius: 6px; cursor: pointer; color: #d1d7db; }',
+		'.viewrow:hover { background: #2a3942; }',
 		'.msg { padding: 8px 10px; color: #8696a0; line-height: 1.45; }',
 		'input { width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 6px;',
 		'  border: 1px solid #2a3942; background: #111b21; color: #e9edef;',
@@ -46,7 +57,23 @@ const accountOverlayScript = `
 		'.btns button.go.danger { background: #f15c6d; border-color: #f15c6d; }'
 	].join(' ');
 
-	var host = null, root = null, state = null, mode = 'list', open = false;
+	var host = null, root = null, state = null, mode = 'list', open = false, pageTab = 'all';
+
+	function svcOf(a) {
+		return (a && a.service === 'telegram') ? 'telegram' : 'whatsapp';
+	}
+
+	function badgeOf(a) {
+		return svcOf(a) === 'telegram' ? 'TG' : 'WA';
+	}
+
+	function prefsOf() {
+		if (state && state.prefs && (state.prefs.viewMode === 'pages' || state.prefs.viewMode === 'tabs')) {
+			return state.prefs.viewMode;
+		}
+		if (state && state.prefs && state.prefs.ViewMode === 'pages') { return 'pages'; }
+		return 'tabs';
+	}
 
 	function mount() {
 		if (host && document.documentElement.contains(host)) { return; }
@@ -170,12 +197,25 @@ const accountOverlayScript = `
 
 	function renderList(panel) {
 		panel.appendChild(el('div', 'hdr', 'Accounts'));
+		var view = prefsOf();
+		if (view === 'pages') {
+			var tabs = el('div', 'tabs');
+			[['whatsapp', 'WhatsApp'], ['telegram', 'Telegram'], ['all', 'All']].forEach(function (t) {
+				var b = el('button', pageTab === t[0] ? 'on' : '', t[1]);
+				b.addEventListener('click', function () { pageTab = t[0]; render(); });
+				tabs.appendChild(b);
+			});
+			panel.appendChild(tabs);
+		}
 		var accounts = state ? state.accounts : [];
 		accounts.forEach(function (a) {
+			if (view === 'pages' && pageTab !== 'all' && svcOf(a) !== pageTab) { return; }
 			var isCurrent = a.id === state.current;
 			var row = el('div', isCurrent ? 'row on' : 'row');
 			row.appendChild(el('span', 'tick', isCurrent ? '✓' : ''));
 			row.appendChild(el('span', 'nm', a.name));
+			var badge = el('span', 'badge' + (svcOf(a) === 'telegram' ? ' tg' : ''), badgeOf(a));
+			row.appendChild(badge);
 			if (!isCurrent) {
 				row.addEventListener('click', function () {
 					window.wadeskAccountSwitch(a.id);
@@ -188,15 +228,37 @@ const accountOverlayScript = `
 
 		panel.appendChild(el('div', 'sep'));
 
-		var add = el('div', 'act');
-		add.appendChild(el('span', 'gl', '+'));
-		add.appendChild(el('span', 'nm', 'Add account'));
-		add.addEventListener('click', function () {
-			window.wadeskAccountAdd();
-			open = false;
+		[['whatsapp', 'Add WhatsApp'], ['telegram', 'Add Telegram']].forEach(function (t) {
+			var add = el('div', 'act');
+			add.appendChild(el('span', 'gl', '+'));
+			add.appendChild(el('span', 'nm', t[1]));
+			add.addEventListener('click', function () {
+				if (typeof window.wadeskAccountAddService === 'function') {
+					window.wadeskAccountAddService(t[0]);
+				} else {
+					window.wadeskAccountAdd();
+				}
+				open = false;
+				render();
+			});
+			panel.appendChild(add);
+		});
+
+		var toggle = el('div', 'viewrow');
+		toggle.appendChild(el('span', 'gl', view === 'pages' ? '▦' : '▤'));
+		toggle.appendChild(el('span', 'nm', view === 'pages' ? 'View: Pages (switch to Tabs)' : 'View: Tabs (switch to Pages)'));
+		toggle.addEventListener('click', function () {
+			var next = view === 'pages' ? 'tabs' : 'pages';
+			if (typeof window.wadeskPrefsSet === 'function') {
+				window.wadeskPrefsSet(next).then(function () { setTimeout(refresh, 80); });
+			}
+			if (state && state.prefs) {
+				if ('viewMode' in state.prefs) { state.prefs.viewMode = next; }
+				state.prefs.ViewMode = next;
+			}
 			render();
 		});
-		panel.appendChild(add);
+		panel.appendChild(toggle);
 
 		var ren = el('div', 'act');
 		ren.appendChild(el('span', 'gl', '✎'));

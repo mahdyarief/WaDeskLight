@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	windowTitle = "WaDeskLight"
+	windowTitle = "WaGram Desk Lite"
 	appURL      = "https://web.whatsapp.com"
 	mutexName   = "WaDeskLightSingleInstanceMutex"
 	userAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
@@ -371,8 +371,8 @@ func restoreWindow(hwnd uintptr) {
 	procSetFgWindow.Call(hwnd)
 }
 
-func windowTitleFor(name string) string {
-	return windowTitle + " — " + name
+func windowTitleFor(a account) string {
+	return windowTitle + " — " + a.Name + " [" + string(serviceBadge(a.Service.normalize())) + "]"
 }
 
 // validProfileID guards the profile name before it reaches the filesystem.
@@ -430,7 +430,7 @@ func focusAccount(from uintptr, a account) {
 	// Carry this window's placement over so switching reads as one window
 	// changing account, rather than a smaller new window appearing.
 	st, _ := captureWindowState(from)
-	titlePtr, _ := windows.UTF16PtrFromString(windowTitleFor(a.Name))
+	titlePtr, _ := windows.UTF16PtrFromString(windowTitleFor(a))
 	target, _, _ := procFindWindow.Call(0, uintptr(unsafe.Pointer(titlePtr)))
 	if target != 0 {
 		applyWindowState(target, st)
@@ -445,8 +445,8 @@ func focusAccount(from uintptr, a account) {
 	spawnAccount(a.ID)
 }
 
-func applyAccountName(hwnd uintptr, name string) {
-	gWindowTitle = windowTitleFor(name)
+func applyAccountName(hwnd uintptr, a account) {
+	gWindowTitle = windowTitleFor(a)
 	titlePtr, _ := windows.UTF16PtrFromString(gWindowTitle)
 	procSetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(titlePtr)))
 
@@ -472,7 +472,7 @@ func showTrayMenu(hwnd uintptr) {
 	if menu == 0 {
 		return
 	}
-	procAppendMenuW.Call(menu, 0, menuOpen, strPtr("Open WaDeskLight"))
+	procAppendMenuW.Call(menu, 0, menuOpen, strPtr("Open WaGram Desk Lite"))
 	procAppendMenuW.Call(menu, mfSeparator, 0, 0)
 
 	accounts := loadAccounts()
@@ -522,7 +522,7 @@ func windowProc(hwnd, msg, wp, lp uintptr) uintptr {
 		procShowWindow.Call(hwnd, swHide)
 		setMemoryUsageTargetLevel(memoryUsageLow)
 		setEcoQoS(true)
-		go trayBalloon("WaDeskLight", "Masih berjalan di system tray. Klik ikon untuk membuka kembali.", nil)
+		go trayBalloon("WaGram Desk Lite", "Masih berjalan di system tray. Klik ikon untuk membuka kembali.", nil)
 		return 0
 	case wmShowWindow:
 		if wp != 0 {
@@ -555,7 +555,7 @@ func installWindowSubclass(hwnd uintptr) {
 func Run() int {
 	profileID, explicit := profileFromArgs()
 	gProfileID = profileID
-	gWindowTitle = windowTitleFor(ensureAccount(profileID).Name)
+	gWindowTitle = windowTitleFor(ensureAccount(profileID))
 
 	_, isSingle := checkSingleInstance()
 	if !isSingle {
@@ -647,9 +647,10 @@ func Run() int {
 	type accountsView struct {
 		Current  string    `json:"current"`
 		Accounts []account `json:"accounts"`
+		Prefs    prefs     `json:"prefs"`
 	}
 	_ = w.Bind("wadeskAccountsState", func() accountsView {
-		return accountsView{Current: gProfileID, Accounts: loadAccounts()}
+		return accountsView{Current: gProfileID, Accounts: loadAccounts(), Prefs: loadPrefs()}
 	})
 	_ = w.Bind("wadeskAccountSwitch", func(id string) {
 		for _, a := range loadAccounts() {
@@ -662,10 +663,25 @@ func Run() int {
 	_ = w.Bind("wadeskAccountAdd", func() {
 		focusAccount(hwnd, addAccount())
 	})
+	_ = w.Bind("wadeskAccountAddService", func(svc string) {
+		focusAccount(hwnd, addServiceAccount(Service(svc)))
+	})
+	_ = w.Bind("wadeskPrefsGet", func() prefs {
+		return loadPrefs()
+	})
+	_ = w.Bind("wadeskPrefsSet", func(mode string) {
+		p := loadPrefs()
+		if mode == string(ViewPages) {
+			p.ViewMode = ViewPages
+		} else {
+			p.ViewMode = ViewTabs
+		}
+		savePrefs(p)
+	})
 	_ = w.Bind("wadeskAccountRename", func(id, name string) {
 		renameAccount(id, name)
 		if id == gProfileID {
-			w.Dispatch(func() { applyAccountName(hwnd, accountName(id)) })
+			w.Dispatch(func() { applyAccountName(hwnd, accountFor(id)) })
 		}
 	})
 	// Only the account you are looking at can be removed: another instance owns
@@ -750,7 +766,7 @@ func Run() int {
 
 	w.Init(initScript)
 	w.Init(accountOverlayScript)
-	w.Navigate(appURL)
+	w.Navigate(serviceURL(ensureAccount(profileID).Service))
 	w.Run()
 
 	return 0

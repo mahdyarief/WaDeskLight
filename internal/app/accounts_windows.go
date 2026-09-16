@@ -28,6 +28,9 @@ type account struct {
 	Name string `json:"name"`
 	// Autostart records whether this account was open when the app last ran.
 	Autostart bool `json:"autostart"`
+	// Service is whatsapp (default) or telegram. Empty means whatsapp
+	// for accounts written before multi-service support.
+	Service Service `json:"service,omitempty"`
 }
 
 type accountsFile struct {
@@ -100,9 +103,12 @@ func readAccounts() []account {
 			rest = append(rest, f.Accounts[i])
 		}
 		if def == nil {
-			def = &account{ID: defaultProfileID, Name: "Account 1", Autostart: true}
+			def = &account{ID: defaultProfileID, Name: "Account 1", Autostart: true, Service: ServiceWhatsApp}
 		}
 		f.Accounts = append([]account{*def}, rest...)
+	}
+	for i := range f.Accounts {
+		f.Accounts[i].Service = f.Accounts[i].Service.normalize()
 	}
 	return f.Accounts
 }
@@ -132,12 +138,17 @@ func loadAccounts() []account {
 }
 
 func accountName(id string) string {
+	return accountFor(id).Name
+}
+
+func accountFor(id string) account {
 	for _, a := range loadAccounts() {
 		if a.ID == id {
-			return a.Name
+			a.Service = a.Service.normalize()
+			return a
 		}
 	}
-	return "Account"
+	return account{ID: id, Name: "Account", Service: ServiceWhatsApp}
 }
 
 func setAutostart(id string, on bool) {
@@ -198,7 +209,7 @@ func ensureAccount(id string) account {
 				return accounts
 			}
 		}
-		found = account{ID: id, Name: nextAccountName(accounts), Autostart: true}
+		found = account{ID: id, Name: nextAccountName(accounts), Autostart: true, Service: ServiceWhatsApp}
 		return append(accounts, found)
 	})
 	return found
@@ -206,12 +217,18 @@ func ensureAccount(id string) account {
 
 // addAccount registers a new profile and returns it.
 func addAccount() account {
+	return addServiceAccount(ServiceWhatsApp)
+}
+
+// addServiceAccount registers a new profile for the given service.
+func addServiceAccount(svc Service) account {
 	var created account
 	mutateAccounts(func(accounts []account) []account {
 		created = account{
 			ID:        nextProfileID(accounts),
 			Name:      nextAccountName(accounts),
 			Autostart: true,
+			Service:   svc.normalize(),
 		}
 		return append(accounts, created)
 	})
