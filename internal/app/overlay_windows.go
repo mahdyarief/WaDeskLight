@@ -40,17 +40,6 @@ const accountOverlayScript = `
 		'  background: #202c33; color: #8696a0; cursor: pointer;',
 		'  font: 500 12px system-ui, sans-serif; }',
 		'.tabs button.on { background: #2a3942; color: #e9edef; }',
-		'.tabbar { position: fixed; top: 8px; left: 50%; transform: translateX(-50%);',
-		'  display: flex; gap: 4px; padding: 4px 6px; max-width: 92vw;',
-		'  background: rgba(32,44,51,.96); border: 1px solid #2a3942; border-radius: 20px;',
-		'  box-shadow: 0 4px 18px rgba(0,0,0,.5); z-index: 2147483000; box-sizing: border-box; }',
-		'.tabbar button { border: 1px solid transparent; background: transparent; color: #8696a0;',
-		'  cursor: pointer; font: 600 12px system-ui, sans-serif; padding: 6px 12px;',
-		'  border-radius: 14px; white-space: nowrap; max-width: 180px; overflow: hidden;',
-		'  text-overflow: ellipsis; }',
-		'.tabbar button:hover { background: #2a3942; color: #e9edef; }',
-		'.tabbar button.on { background: #00a884; border-color: #00a884; color: #0b141a; }',
-		'.tabbar button.on.tg { background: #37aee2; border-color: #37aee2; }',
 		'.viewrow { display: flex; align-items: center; gap: 8px; padding: 8px 10px;',
 		'  border-radius: 6px; cursor: pointer; color: #d1d7db; }',
 		'.viewrow:hover { background: #2a3942; }',
@@ -84,12 +73,6 @@ const accountOverlayScript = `
 		}
 		if (state && state.prefs && state.prefs.ViewMode === 'pages') { return 'pages'; }
 		return 'tabs';
-	}
-
-	function activeIdOf() {
-		if (state && state.prefs && state.prefs.activeAccount) { return state.prefs.activeAccount; }
-		if (state && state.prefs && state.prefs.ActiveID) { return state.prefs.ActiveID; }
-		return state ? state.current : '';
 	}
 
 	function mount() {
@@ -188,36 +171,9 @@ const accountOverlayScript = `
 		panel.style.bottom = Math.round(window.innerHeight - r.bottom) + 'px';
 	}
 
-	function renderTabbar() {
-		var old = root && root.querySelector('.tabbar');
-		if (old) { old.remove(); }
-		if (!state || prefsOf() !== 'tabs') { return; }
-		var accounts = state.accounts || [];
-		if (accounts.length < 2) { return; }
-		var active = activeIdOf();
-		var bar = el('div', 'tabbar');
-		bar.addEventListener('click', function (ev) { ev.stopPropagation(); });
-		accounts.forEach(function (a) {
-			var isOn = a.id === active;
-			var b = el('button', isOn ? ('on' + (svcOf(a) === 'telegram' ? ' tg' : '')) : '', '');
-			b.textContent = (svcOf(a) === 'telegram' ? '[TG] ' : '[WA] ') + a.name;
-			b.title = a.name;
-			if (!isOn && typeof window.wadeskTabSelect === 'function') {
-				(function (id) {
-					b.addEventListener('click', function () {
-						window.wadeskTabSelect(id);
-						setTimeout(refresh, 150);
-					});
-				})(a.id);
-			}
-			bar.appendChild(b);
-		});
-		root.appendChild(bar);
-	}
-
 	function render() {
 		if (!root) { return; }
-		root.querySelectorAll('.btn, .panel, .tabbar').forEach(function (n) { n.remove(); });
+		root.querySelectorAll('.btn, .panel').forEach(function (n) { n.remove(); });
 
 		var btn = el('button', 'btn', String(currentIndex()));
 		btn.title = 'Accounts - ' + currentName();
@@ -228,7 +184,6 @@ const accountOverlayScript = `
 		});
 		root.appendChild(btn);
 		anchorButton();
-		renderTabbar();
 		if (!open) { return; }
 
 		var panel = el('div', 'panel');
@@ -396,13 +351,6 @@ const accountOverlayScript = `
 			reanchor();
 		}
 	}, 1000);
-
-	// Poll prefs so the tab bar highlights the active account even after
-	// another window changed it. Skipped while the panel is open to avoid
-	// clobbering rename input focus.
-	setInterval(function () {
-		if (!open && host && document.documentElement.contains(host)) { refresh(); }
-	}, 3000);
 
 	if (document.readyState === 'loading') {
 		document.addEventListener('DOMContentLoaded', boot);
