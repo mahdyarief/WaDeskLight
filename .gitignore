@@ -1,13 +1,16 @@
 # Build outputs
-WhatsApp.exe
+WaGramDeskLite.exe
 dist/
 build/rsrc_windows_amd64.syso
 build/extract_test/
 
 # Inno Setup installer
-WaDeskLightSetup.exe
+WaGramDeskLiteSetup.exe
 
 # Windows junk
 *.tmp
 *.log
 *.exe~
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

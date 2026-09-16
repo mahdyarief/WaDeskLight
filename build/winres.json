@@ -18,12 +18,12 @@
         },
         "info": {
           "0409": {
-            "CompanyName": "WaDeskLight",
-            "FileDescription": "WaDeskLight WhatsApp Desktop",
+            "CompanyName": "WaGramDeskLite",
+            "FileDescription": "WaGram Desk Lite — WhatsApp + Telegram",
             "FileVersion": "1.2.0",
-            "InternalName": "WhatsApp.exe",
-            "OriginalFilename": "WhatsApp.exe",
-            "ProductName": "WaDeskLight",
+            "InternalName": "WaGramDeskLite.exe",
+            "OriginalFilename": "WaGramDeskLite.exe",
+            "ProductName": "WaGram Desk Lite",
             "ProductVersion": "1.2.0"
           }
         }

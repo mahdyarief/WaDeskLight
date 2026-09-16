@@ -39,7 +39,7 @@ func StartLabeler() {
 }
 
 func labelAudioSessions() {
-	processIDs := wadeskLightWebViewProcesses(uint32(syscall.Getpid()))
+	processIDs := waGramDeskLiteWebViewProcesses(uint32(syscall.Getpid()))
 	if len(processIDs) == 0 {
 		return
 	}
@@ -102,7 +102,7 @@ func labelAudioSessions() {
 	}
 }
 
-func wadeskLightWebViewProcesses(rootPID uint32) map[uint32]bool {
+func waGramDeskLiteWebViewProcesses(rootPID uint32) map[uint32]bool {
 	parents := map[uint32]uint32{}
 	entries := map[uint32]string{}
 

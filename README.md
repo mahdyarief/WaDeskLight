@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.png" alt="WaDeskLight Banner" width="100%">
+  <img src="assets/banner.png" alt="WaGramDeskLite Banner" width="100%">
 </p>
 
 <h3 align="center">Lightweight WhatsApp Desktop Client for Windows</h3>
@@ -12,7 +12,7 @@
 
 ## About
 
-**WaDeskLight** is a minimal, native Windows wrapper for WhatsApp Web. Instead of bundling a full Chromium engine like Electron apps, it uses the WebView2 runtime already present on Windows 10/11 to render WhatsApp Web in a clean, dark-themed window with system tray integration.
+**WaGramDeskLite** is a minimal, native Windows wrapper for WhatsApp Web. Instead of bundling a full Chromium engine like Electron apps, it uses the WebView2 runtime already present on Windows 10/11 to render WhatsApp Web in a clean, dark-themed window with system tray integration.
 
 ## Highlights
 
@@ -36,19 +36,19 @@
 
 <img src="screenshot-webview2-manager.png" alt="WebView2 Manager processes used by WhatsApp Web" width="100%">
 
-### WaDeskLight Process Usage
+### WaGramDeskLite Process Usage
 
-<img src="screenshot-wadesklight-task-manager.png" alt="WaDeskLight process in Windows Task Manager" width="100%">
+<img src="screenshot-wagramdesklite-task-manager.png" alt="WaGramDeskLite process in Windows Task Manager" width="100%">
 
 ## Quick Start
 
-1. Download [`WaDeskLightSetup.exe`](https://github.com/rayss868/WaDeskLight/releases/latest) from Releases
+1. Download [`WaGramDeskLiteSetup.exe`](https://github.com/rayss868/WaGramDeskLite/releases/latest) from Releases
 2. Run the installer — it adds a "WhatsApp" shortcut to your Start Menu automatically
 3. Scan the QR code with your phone
 4. Allow camera/mic access when Windows prompts you
 5. That's it — your session is saved automatically
 
-> The setup installs the app under `%LOCALAPPDATA%\Programs\WaDeskLight` and creates a **WhatsApp** shortcut, so it shows up when you search "wa" in Windows. A portable `WhatsApp.exe` is also available for those who prefer no installer.
+> The setup installs the app under `%LOCALAPPDATA%\Programs\WaGramDeskLite` and creates a **WhatsApp** shortcut, so it shows up when you search "wa" in Windows. A portable `WaGramDeskLite.exe` is also available for those who prefer no installer.
 
 ### macOS
 
@@ -74,9 +74,9 @@ The tray menu carries the same account list as a shortcut, so you can switch wit
 All profile data (cookies, localStorage, IndexedDB) is stored locally:
 
 ```text
-%APPDATA%\WaDeskLight\UserData                  # first account
-%APPDATA%\WaDeskLight\profiles\<id>\UserData    # additional accounts
-%APPDATA%\WaDeskLight\accounts.json             # the account list
+%APPDATA%\WaGramDeskLite\UserData                  # first account
+%APPDATA%\WaGramDeskLite\profiles\<id>\UserData    # additional accounts
+%APPDATA%\WaGramDeskLite\accounts.json             # the account list
 ```
 
 Back up these folders to preserve your logins. Deleting one will require re-pairing that device.
@@ -96,11 +96,11 @@ Back up these folders to preserve your logins. Deleting one will require re-pair
 
 # Or manually:
 # go-winres make -arch amd64 --in winres.json   (run inside build/)
-# cp build/rsrc_windows_amd64.syso cmd/wadesklight/rsrc.syso
-# go build -ldflags="-H windowsgui -s -w" -o dist/WhatsApp.exe ./cmd/wadesklight
+# cp build/rsrc_windows_amd64.syso cmd/wagramdesklite/rsrc.syso
+# go build -ldflags="-H windowsgui -s -w" -o dist/WaGramDeskLite.exe ./cmd/wagramdesklite
 ```
 
-The output `dist\WhatsApp.exe` includes embedded icon, DPI manifest, and Windows VERSIONINFO metadata.
+The output `dist\WaGramDeskLite.exe` includes embedded icon, DPI manifest, and Windows VERSIONINFO metadata.
 
 ## Tech Stack
 
@@ -115,9 +115,9 @@ The output `dist\WhatsApp.exe` includes embedded icon, DPI manifest, and Windows
 ## Project Layout
 
 ```
-WaDeskLight/
+WaGramDeskLite/
 ├── cmd/
-│   └── wadesklight/
+│   └── wagramdesklite/
 │       ├── main.go        # Thin entry point
 │       └── rsrc.syso      # Compiled Windows resources (icon, manifest, version) 
 ├── internal/
@@ -127,7 +127,7 @@ WaDeskLight/
 ├── build/                 # winres.json, winres/ data, app.manifest (resources source)
 ├── scripts/
 │   └── build.sh           # One-shot resource + executable build
-├── dist/                  # Build output (WhatsApp.exe)
+├── dist/                  # Build output (WaGramDeskLite.exe)
 ├── go.mod / go.sum        # Go module definition
 └── vendor/                # Vendored dependencies
 ```

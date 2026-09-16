@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"wadesklight/internal/app"
+	"wagramdesklite/internal/app"
 )
 
 func main() {
