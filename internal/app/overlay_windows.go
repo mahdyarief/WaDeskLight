@@ -162,8 +162,12 @@ const accountOverlayScript = `
 		if (r && r.width > 0 && r.height > 0) {
 			var size = Math.round(r.width);
 			var gap = Math.round(size * 0.1);
+			// The rail is measured while the page is still settling, and a
+			// half-laid-out box can put the button above the viewport, where it
+			// stays invisible. Never let the measurement take it off-screen.
+			var top = Math.max(4, Math.round(r.top - size - gap));
 			btn.style.left = Math.round(r.left) + 'px';
-			btn.style.top = Math.round(r.top - size - gap) + 'px';
+			btn.style.top = top + 'px';
 			btn.style.bottom = 'auto';
 			btn.style.width = size + 'px';
 			btn.style.height = size + 'px';
@@ -397,26 +401,31 @@ const accountOverlayScript = `
 
 	var railEl = null, railResize = null, watching = false;
 
+	// The footer we sit above is React-owned. It gets replaced when the chat
+	// list is rebuilt, and its box also moves while the app settles, so the
+	// anchor is re-measured on every throttled tick and not only when the
+	// element identity changes. Measuring an unchanged element is the whole
+	// point: an earlier version returned early on identity, which left the
+	// button parked at a half-laid-out position (a negative top, off-screen)
+	// for the rest of the session.
 	function trackTheRail() {
 		if (!document.documentElement || !document.documentElement.contains(host)) {
 			boot();
 		}
 		var rail = document.querySelector('[data-testid="navbar-footer-section"]');
-		if (rail === railEl) { return; }
-		railEl = rail;
-		if (rail && railResize) {
-			railResize.disconnect();
-			railResize.observe(rail);
+		if (rail !== railEl) {
+			railEl = rail;
+			if (railResize) {
+				railResize.disconnect();
+				if (rail) { railResize.observe(rail); }
+			}
 		}
 		reanchor();
 	}
 
-	// The rail we sit above is React-owned and gets replaced whenever the chat
-	// list is rebuilt, so the anchor follows the element rather than a position.
-	// A subtree observer sees every one of those mutations, but its callback is
-	// an identity compare behind a throttle, so a churning page costs a few
-	// cheap checks a second and a quiet page costs nothing at all. That is the
-	// property a setInterval could not have.
+	// A subtree observer sees every mutation, but its callback runs behind a
+	// throttle: a churning page costs a few rect reads a second and a quiet page
+	// costs nothing at all. That is the property a setInterval could not have.
 	function watch() {
 		if (watching || !document.documentElement) { return; }
 		watching = true;
@@ -424,17 +433,30 @@ const accountOverlayScript = `
 			railResize = new ResizeObserver(reanchor);
 		}
 		if (typeof MutationObserver !== 'undefined') {
-			var lastCheck = 0;
-			new MutationObserver(function () {
-				var now = Date.now();
-				if (now - lastCheck < 250) { return; }
-				lastCheck = now;
+			// A mutation that lands inside the throttle window still has to be
+			// acted on, or the last layout of a burst is the one state we never
+			// measure. The trailing timer drains it.
+			var lastCheck = 0, trailing = 0;
+			var onMutations = function () {
+				var wait = 250 - (Date.now() - lastCheck);
+				if (wait > 0) {
+					if (!trailing) {
+						trailing = setTimeout(function () {
+							trailing = 0;
+							lastCheck = Date.now();
+							trackTheRail();
+						}, wait);
+					}
+					return;
+				}
+				lastCheck = Date.now();
 				trackTheRail();
-			}).observe(document.body || document.documentElement, { childList: true, subtree: true });
+			};
+			new MutationObserver(onMutations).observe(document.body || document.documentElement, { childList: true, subtree: true });
 
 			// Our host is a direct child of <html>, so a hard navigation that
 			// replaces the document's children is outside the observer above.
-			new MutationObserver(trackTheRail).observe(document.documentElement, { childList: true });
+			new MutationObserver(onMutations).observe(document.documentElement, { childList: true });
 		}
 		trackTheRail();
 	}
