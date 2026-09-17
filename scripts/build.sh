@@ -25,6 +25,7 @@ echo "[2/3] Building $OUT..."
 mkdir -p dist
 go build -ldflags="-H windowsgui -s -w" -o "$OUT" ./cmd/wagramdesklite
 # The tray icon is loaded at runtime from icon.ico next to the executable.
+cp assets/icon.ico icon.ico
 cp assets/icon.ico dist/icon.ico
 
 echo "[3/3] Done: $OUT"
