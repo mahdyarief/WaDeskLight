@@ -25,11 +25,20 @@ const (
 
 var (
 	// Identity of the account this process serves.
-	gProfileID   = defaultProfileID
-	gWindowTitle = windowTitle
+	gProfileID = defaultProfileID
+	// Name only, kept apart from the window title so a balloon can name the
+	// account without carrying the whole app title.
+	gAccountName = "Account"
+	// Service badge ("WA"/"TG") for the same reason: the balloon says which
+	// messenger and which account without repeating the app name.
+	gServiceBadge = serviceBadge(ServiceWhatsApp)
+	gWindowTitle  = windowTitle
 	// Set when the user asks to remove this account; acted on after the
 	// WebView2 instance is torn down and its files are unlocked.
 	gPendingRemove bool
+	// Kept so a tray balloon click can be handed to the page without
+	// threading the webview down through the window procedure.
+	gWebView webview2.WebView
 )
 
 func checkSingleInstance() (uintptr, bool) {
@@ -96,8 +105,11 @@ func showErrorDialog(message string) {
 // It returns the process exit code.
 func Run() int {
 	profileID, explicit := profileFromArgs()
+	acct := ensureAccount(profileID)
 	gProfileID = profileID
-	gWindowTitle = windowTitleFor(ensureAccount(profileID))
+	gAccountName = acct.Name
+	gServiceBadge = serviceBadge(acct.Service)
+	gWindowTitle = windowTitleFor(acct)
 
 	_, isSingle := checkSingleInstance()
 	if !isSingle {
@@ -156,6 +168,10 @@ func Run() int {
 		}
 	}()
 	defer w.Destroy()
+	gWebView = w
+	// Registered after the Destroy defer, so it runs first: a balloon click
+	// during teardown must not reach a webview that is already gone.
+	defer func() { gWebView = nil }()
 	initMemoryControl(w)
 	enableContextMenu(w)
 	initNotificationPermission(w)

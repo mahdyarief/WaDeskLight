@@ -84,7 +84,12 @@ func windowProc(hwnd, msg, wp, lp uintptr) uintptr {
 		return 0
 	case wmTrayCallback:
 		switch uint32(lp) & 0xFFFF {
-		case wmLButtonUp, wmLButtonDblClk, ninBalloonUserClick:
+		case ninBalloonUserClick:
+			// The popup was for a specific conversation, so bring the window
+			// forward and let the page open it.
+			restoreWindow(hwnd)
+			openLastNotificationChat()
+		case wmLButtonUp, wmLButtonDblClk:
 			restoreWindow(hwnd)
 		case wmRButtonUp:
 			showTrayMenu(hwnd)
