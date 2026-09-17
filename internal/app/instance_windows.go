@@ -149,6 +149,8 @@ func focusAccount(from uintptr, a account) {
 }
 
 func applyAccountName(hwnd uintptr, a account) {
+	gAccountName = a.Name
+	gServiceBadge = serviceBadge(a.Service)
 	gWindowTitle = windowTitleFor(a)
 	titlePtr, _ := windows.UTF16PtrFromString(gWindowTitle)
 	procSetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(titlePtr)))

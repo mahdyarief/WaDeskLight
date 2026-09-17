@@ -2,7 +2,11 @@
 
 package app
 
-import "github.com/jchv/go-webview2"
+import (
+	"strings"
+
+	"github.com/jchv/go-webview2"
+)
 
 // accountsView is the snapshot the overlay script reads to render the account
 // list and the settings rows.
@@ -19,7 +23,22 @@ func registerBindings(w webview2.WebView, hwnd uintptr) {
 			return
 		}
 		icon := decodeDataURL(iconDataURL)
-		go trayBalloon(title, body, icon)
+		// The balloon is the one surface where several accounts share a single
+		// tray icon, so its title names the account instead of repeating the
+		// app name. The sender, which the page passed as the title, moves into
+		// the message so nothing is lost.
+		sender := strings.TrimSpace(title)
+		text := strings.TrimSpace(body)
+		switch {
+		case sender != "" && text != "":
+			text = sender + ": " + text
+		case text == "":
+			text = sender
+		}
+		// Short by design: the title has room for one line, and it has to say
+		// both which messenger and which account, since two WhatsApp windows
+		// would otherwise read the same.
+		go trayBalloon(gServiceBadge+" - "+gAccountName, text, icon)
 	})
 	_ = w.Bind("wagramNotificationsSet", func(on bool) {
 		p := loadPrefs()

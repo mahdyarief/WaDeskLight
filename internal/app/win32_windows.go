@@ -77,9 +77,15 @@ const (
 	wmMouseMove         = 0x0200
 	wmTimer             = 0x0113
 	wmShowWindow        = 0x0018
-	wmApp               = 0x8000
-	wmTrayCallback      = wmApp + 1
-	ninBalloonUserClick = wmApp + 5
+	wmApp = 0x8000
+	// wmTrayCallback is the message the shell sends for every tray event; the
+	// event itself arrives in the low word of lParam.
+	wmTrayCallback = wmApp + 1
+	// Balloon events are NOT app-private messages. The shell defines them off
+	// WM_USER and puts the value in lParam, so the click arrives as 0x0405 and
+	// a WM_APP-based constant would never match it.
+	wmUser              = 0x0400
+	ninBalloonUserClick = wmUser + 5
 	// wmApplyLite is posted from the JS binding, which may run off the UI
 	// thread, to re-evaluate the low-memory setting where it is legal to.
 	wmApplyLite = wmApp + 6

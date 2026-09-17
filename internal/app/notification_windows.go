@@ -23,6 +23,22 @@ func initNotificationPermission(w webview2.WebView) {
 	setNotificationPermission(notificationsEnabled(loadPrefs()))
 }
 
+// openLastNotificationChat hands a tray balloon click back to the page, which
+// knows how to open the conversation the popup was for. Telegram's worker
+// routes its own clicks by posting a focusMessage payload to the page, and a
+// page-built Notification carries the handler the site would have run, so
+// replaying either one opens the right chat. When neither exists the window
+// simply comes forward, which is all the site itself would have done.
+func openLastNotificationChat() {
+	w := gWebView
+	if w == nil {
+		return
+	}
+	w.Dispatch(func() {
+		w.Eval("window.wagramNotificationClick && window.wagramNotificationClick()")
+	})
+}
+
 // setNotificationPermission answers WebView2's notification permission request.
 // A host that never handles the event leaves Chromium on its default, which is
 // to deny, and that silently breaks any client that gates its popups on it. The
@@ -49,15 +65,15 @@ const notificationPolyfillJS = `		// Native Notification Polyfill for Windows Tr
 			var hasBridge = typeof window.sendNativeNotification === 'function';
 
 			// Two services share one balloon layout, so the icon is the only
-			// cue that says which one a popup came from. A ring in the brand
-			// colour plus a corner chip carrying the initial reads at the size
-			// Windows scales a balloon icon down to, and needs no extra text.
+			// cue that says which one a popup came from. The brand colour
+			// alone carries it, as a ring around the avatar and as the disc
+			// behind an avatar-less popup.
 			var SERVICE = /telegram/i.test(location.hostname)
-				? { color: '#229ed9', letter: 'T' }
-				: { color: '#25d366', letter: 'W' };
+				? { color: '#229ed9' }
+				: { color: '#25d366' };
 
 			// Draws the balloon icon. A missing avatar still gets the full
-			// treatment, so the badge is always the thing you see.
+			// treatment, so the colour is always the thing you see.
 			function paintIcon(ctx, size, bmp) {
 				var cx = size / 2, cy = size / 2, r = size / 2;
 				ctx.clearRect(0, 0, size, size);
@@ -82,23 +98,6 @@ const notificationPolyfillJS = `		// Native Notification Polyfill for Windows Tr
 				ctx.lineWidth = 4;
 				ctx.strokeStyle = SERVICE.color;
 				ctx.stroke();
-
-				// The chip sits over the avatar, so it needs a dark outline to
-				// stay separate from a light or busy picture.
-				var br = size * 0.26;
-				var bx = size - br - 1, by = size - br - 1;
-				ctx.beginPath();
-				ctx.arc(bx, by, br, 0, Math.PI * 2);
-				ctx.fillStyle = SERVICE.color;
-				ctx.fill();
-				ctx.lineWidth = 3;
-				ctx.strokeStyle = 'rgba(11, 20, 26, 0.85)';
-				ctx.stroke();
-				ctx.fillStyle = '#ffffff';
-				ctx.font = '700 ' + Math.round(br * 1.25) + 'px system-ui, sans-serif';
-				ctx.textAlign = 'center';
-				ctx.textBaseline = 'middle';
-				ctx.fillText(SERVICE.letter, bx, by + 1);
 			}
 
 			function newCanvas(size) {
@@ -109,17 +108,17 @@ const notificationPolyfillJS = `		// Native Notification Polyfill for Windows Tr
 			}
 
 			// Always resolves to a data URL the native side can turn into an
-			// icon. The badge is the point, so an unreachable avatar degrades
-			// to a badged disc rather than to no icon at all.
+			// icon. The colour is the point, so an unreachable avatar degrades
+			// to a tinted disc rather than to no icon at all.
 			function iconDataURL(url) {
 				var size = 64;
 				var canvas = newCanvas(size);
 				var ctx = canvas.getContext('2d');
-				var badged = function() {
+				var tinted = function() {
 					paintIcon(ctx, size, null);
 					return canvas.toDataURL('image/png');
 				};
-				if (!url) { return Promise.resolve(badged()); }
+				if (!url) { return Promise.resolve(tinted()); }
 				return fetch(url)
 					.then(function(r) { return r.blob(); })
 					.then(function(blob) { return createImageBitmap(blob); })
@@ -128,7 +127,7 @@ const notificationPolyfillJS = `		// Native Notification Polyfill for Windows Tr
 						bmp.close();
 						return canvas.toDataURL('image/png');
 					})
-					.catch(badged);
+					.catch(tinted);
 			}
 
 			// Every notification path funnels through here, so a client that
@@ -150,9 +149,39 @@ const notificationPolyfillJS = `		// Native Notification Polyfill for Windows Tr
 					});
 			}
 
+			// A balloon is native, so the browser never delivers its click to
+			// the page. Remember what the newest popup was for and let the host
+			// replay the click into the page it came from. Only the newest
+			// matters: Windows replaces the balloon, so an older target would
+			// open the wrong conversation.
+			var lastNotification = null;
+			var lastTarget = null;
+
+			// Called by the host when the balloon is clicked.
+			window.wagramNotificationClick = function() {
+				if (lastTarget && navigator.serviceWorker && typeof MessageEvent === 'function') {
+					// Telegram's worker routes a click by posting this payload
+					// back to the page, which opens the chat with its own logic.
+					try {
+						navigator.serviceWorker.dispatchEvent(new MessageEvent('message', {
+							data: { type: 'focusMessage', payload: lastTarget }
+						}));
+						return true;
+					} catch (e) {}
+				}
+				if (lastNotification && typeof lastNotification.onclick === 'function') {
+					try { lastNotification.onclick({}); return true; } catch (e) {}
+				}
+				return false;
+			};
+
 			window.Notification = function(title, options) {
 				options = options || {};
 				deliver(title, options.body, options.icon);
+				// The site assigns onclick after construction, so keep the
+				// object rather than the handler.
+				lastNotification = this;
+				lastTarget = null;
 				this.title = title;
 				this.onclick = null;
 				this.onclose = null;
@@ -200,6 +229,10 @@ const notificationPolyfillJS = `		// Native Notification Polyfill for Windows Tr
 				ServiceWorkerRegistration.prototype.showNotification = function(title, options) {
 					options = options || {};
 					deliver(title, options.body, options.icon);
+					// No page-side handler exists for this path, so the newest
+					// popup has no target and must clear any older one.
+					lastNotification = null;
+					lastTarget = null;
 					return Promise.resolve();
 				};
 			}
@@ -222,6 +255,19 @@ const notificationPolyfillJS = `		// Native Notification Polyfill for Windows Tr
 							// chat still updates the badge without a popup.
 							if (!payload.isSilent) {
 								deliver(payload.title, payload.body, payload.icon);
+							}
+							// Mirror the data the worker attaches to its own
+							// notification, which is what it posts back to the
+							// page when the popup is clicked.
+							if (payload.chatId) {
+								lastTarget = {
+									chatId: payload.chatId,
+									messageId: payload.messageId,
+									reaction: payload.reaction,
+									count: 1,
+									shouldReplaceHistory: payload.shouldReplaceHistory
+								};
+								lastNotification = null;
 							}
 						}
 					} catch (e) {}
