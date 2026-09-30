@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/jchv/go-webview2"
+
+	"wagramdesklite/internal/audio"
 )
 
 // accountsView is the snapshot the overlay script reads to render the account
@@ -63,6 +65,32 @@ func registerBindings(w webview2.WebView, hwnd uintptr) {
 		p := loadPrefs()
 		setPrivacyReveal(&p, mode)
 		savePrefs(p)
+	})
+	_ = w.Bind("wagramVolumeSet", func(percent int) {
+		var eff int
+		mutateAccounts(func(accounts []account) []account {
+			for i := range accounts {
+				if accounts[i].ID == gProfileID {
+					setAccountVolume(&accounts[i], percent)
+					eff = effectiveVolume(accounts[i])
+				}
+			}
+			return accounts
+		})
+		audio.SetVolume(eff)
+	})
+	_ = w.Bind("wagramVolumeMute", func(on bool) {
+		var eff int
+		mutateAccounts(func(accounts []account) []account {
+			for i := range accounts {
+				if accounts[i].ID == gProfileID {
+					setAccountMuted(&accounts[i], on)
+					eff = effectiveVolume(accounts[i])
+				}
+			}
+			return accounts
+		})
+		audio.SetVolume(eff)
 	})
 
 	_ = w.Bind("wagramAccountsState", func() accountsView {

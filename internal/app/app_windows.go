@@ -175,7 +175,7 @@ func Run() int {
 	initMemoryControl(w)
 	enableContextMenu(w)
 	initNotificationPermission(w)
-	audio.StartLabeler()
+	audio.StartLabeler(serviceLabel(acct.Service)+" - "+acct.Name, effectiveVolume(acct))
 
 	// Only an implicit launch reopens the accounts from the previous session;
 	// an explicit --profile starts exactly the one account it names.
