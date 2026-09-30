@@ -98,17 +98,19 @@ re-render); and a full-area mask (not a real blur, and cannot work per element).
 
 Holds the whole privacy concern.
 
-- `privacyBlurScript` — a JS const. Templated with two placeholder tokens rather
-  than `fmt` verbs, because the CSS block legitimately contains `%` characters
-  (`width: 100%` is a likely future edit) which `fmt.Sprintf` would misread.
-  Substitution uses `strings.ReplaceAll` on `__WAGDL_BOOTSTRAP__` and
-  `__WAGDL_CSS__`.
+- `privacyBlurScriptTemplate` — a JS const with two placeholder tokens rather
+  than `fmt` verbs, because the CSS block is data and may contain `%`
+  characters. Substitution is done by `strings.ReplaceAll` on
+  `__WAGDL_BOOTSTRAP__` and `__WAGDL_CSS__`.
 - `privacyBootstrap(p prefs) string` — returns a JSON literal
-  `{"on":bool,"reveal":"hard"|"hover"|"click"}` baked into the script at startup.
+  `{"on":bool,"reveal":"hard"|"hover"|"click","sel":string}` baked into the
+  script at startup; `sel` is the selector list the click-reveal handler uses.
 - `privacyCSS() string` — returns the CSS rule block, containing the selectors
-  for **both** services. Both blocks ship in every document; a selector that
-  does not match the loaded page simply does nothing. This avoids threading the
-  account's service into the script and keeps the template a pure constant.
+  for **both** services. Both sets ship in every document; the set that does not
+  match the loaded page simply does nothing. This avoids threading the account's
+  service into the script and keeps the template a pure constant.
+- `privacyScript(p prefs) string` — assembles template + bootstrap + CSS into
+  the final JS to inject.
 
 Script behaviour (runs at document-created on every document):
 
@@ -143,11 +145,12 @@ the blurred area small (see Performance).
 After `w.Init(accountOverlayScript)` (line 220) add one injection:
 
 ```go
-w.Init(applyPrivacyTokens(privacyBlurScript, privacyBootstrap(loadPrefs()), privacyCSS()))
+w.Init(privacyScript(loadPrefs()))
 ```
 
-(The helper name is illustrative; the point is one `w.Init` call after the
-overlay script and before the navigate on line 221.)
+`privacyScript` assembles the template, the bootstrap JSON, and the CSS, so the
+call site stays one line. It sits after the overlay script and before the
+navigate on line 221.
 
 ### `internal/app/prefs_windows.go`
 
@@ -236,18 +239,20 @@ reaching WhatsApp/Telegram shortcuts.
 
 ### WhatsApp (verified against current DOM references)
 
-Gated under `html[data-wagdl-privacy="on"]`:
+Blur is applied to **bounded containers**, not to every text node inside them:
+the same element that blurs must be the one that sharpens, so hover and click
+reveal stay consistent (a blurred child inside a sharpened parent, or vice
+versa, reads as a glitch). Gated under `html[data-wagdl-privacy="on"]`:
 
-- Message text: `#main [data-testid="msg-text"]`, and bubble text spans inside
-  `#main .message-in` / `#main .message-out`.
-- Conversation header (name + avatar): `#main > header`.
-- Chat list rows (name + preview + avatar): `#pane-side div[role="listitem"]`.
-- Media: `#main img`, `#main video`.
-- Chat list avatars: `#pane-side img`.
+- `#main .message-in`, `#main .message-out` — message bubbles (text and any
+  media inside them).
+- `#main > header` — conversation header (name + avatar).
+- `#pane-side div[role="listitem"]` — chat list rows (avatar + name + preview).
 
 Stable anchors: `#main` and `#pane-side` are stable element IDs; `.message-in` /
-`.message-out`, `div[role="listitem"]`, and the `msg-text` testid are long-lived.
-WhatsApp's hashed class names are not relied upon.
+`.message-out` and `div[role="listitem"]` are long-lived. WhatsApp's hashed class
+names are not relied upon. The full-screen media viewer (opened by clicking an
+image) lives outside these containers and is a known gap for v1.
 
 ### Telegram `/a/` (requires a live-DOM verification step)
 
@@ -256,14 +261,13 @@ Telegram has two incompatible web clients, `/k/` and `/a/`; the app navigates to
 are generated and offers no `role="listitem"` equivalent, so it cannot use the
 same anchors as WhatsApp.
 
-Strategy: target the message-history scroller and its bubble wrappers
-structurally, and target the chat list container structurally, rather than by
-generated class name. Because the exact generated names must be read from the
-running page, the implementation plan includes an explicit step: open Telegram
-Web in the app, inspect the live DOM, and fill in the actual selectors for the
-four blur categories. This is a required implementation step, not a placeholder —
-the shipped code must contain concrete selectors, and the no-match-means-no-blur
-rule keeps a stale selector harmless.
+Strategy: target the message bubbles, the conversation header, and the chat list
+rows structurally, rather than by generated class name. Because the exact
+generated names must be read from the running page, the implementation plan
+includes an explicit step: open Telegram Web in the app, inspect the live DOM,
+and fill in the actual selectors for those categories. This is a required
+implementation step, not a placeholder — the shipped code must contain concrete
+selectors, and the no-match-means-no-blur rule keeps a stale selector harmless.
 
 If no Telegram selector can be found for a category, that category is simply not
 blurred on Telegram; WhatsApp is unaffected.
@@ -292,10 +296,10 @@ blurred on Telegram; WhatsApp is unaffected.
 
 `app_windows.go` launches WebView2 with `--disable-gpu
 --disable-gpu-compositing`, so `filter: blur()` is composited on the CPU.
-Blurring a large container (a whole conversation) would repaint that area on
-every scroll frame. Mitigation: blur **leaf** elements — text spans, name spans,
-avatar images, media elements — not the message-list container. This keeps each
-blurred box small and the repaint cheap. Radius stays modest (single-digit px).
+Blurring the whole conversation scroll area would repaint that area on every
+scroll frame. Mitigation: blur only the **bounded containers** — a message
+bubble, a chat row, the conversation header — never the message-list container
+itself. Each blurred box stays message-sized, and the radius stays modest (6px).
 Blur is static while privacy is on, so there is no animation cost beyond the
 one-time painted result.
 
