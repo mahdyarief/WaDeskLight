@@ -91,6 +91,22 @@ const accountOverlayScript = `
 		return true;
 	}
 
+	function privOf() {
+		if (state && state.prefs) {
+			if (typeof state.prefs.privacy === 'boolean') { return state.prefs.privacy; }
+			if (typeof state.prefs.Privacy === 'boolean') { return state.prefs.Privacy; }
+		}
+		return false;
+	}
+
+	function revealOf() {
+		if (state && state.prefs) {
+			var v = state.prefs.privacyReveal || state.prefs.PrivacyReveal;
+			if (v === 'hover' || v === 'click') { return v; }
+		}
+		return 'hard';
+	}
+
 	function mount() {
 		if (host && document.documentElement.contains(host)) { return; }
 		host = document.createElement('div');
@@ -315,6 +331,47 @@ const accountOverlayScript = `
 			render();
 		});
 		panel.appendChild(lite);
+
+		var privOn = privOf();
+		var priv = el('div', 'viewrow');
+		priv.appendChild(el('span', 'gl', privOn ? '◉' : '○'));
+		priv.appendChild(el('span', 'nm', privOn ? 'Privacy: On (blur messages)' : 'Privacy: Off (blur messages)'));
+		priv.addEventListener('click', function () {
+			var next = !privOn;
+			if (typeof window.wagramPrivacyApply === 'function') { window.wagramPrivacyApply(next, revealOf()); }
+			if (typeof window.wagramPrivacySet === 'function') {
+				window.wagramPrivacySet(next).then(function () { setTimeout(refresh, 80); });
+			}
+			if (state && state.prefs) {
+				if ('privacy' in state.prefs) { state.prefs.privacy = next; }
+				state.prefs.Privacy = next;
+			}
+			privOn = next;
+			render();
+		});
+		panel.appendChild(priv);
+
+		var curReveal = revealOf();
+		var reveal = el('div', 'viewrow');
+		reveal.appendChild(el('span', 'gl', curReveal === 'hard' ? '▤' : curReveal === 'hover' ? '▦' : '▣'));
+		reveal.appendChild(el('span', 'nm',
+			curReveal === 'hard' ? 'Reveal: Hard (no peek)'
+			: curReveal === 'hover' ? 'Reveal: Hover (peek on hover)'
+			: 'Reveal: Click (click to peek)'));
+		reveal.addEventListener('click', function () {
+			var now = revealOf();
+			var next = now === 'hard' ? 'hover' : now === 'hover' ? 'click' : 'hard';
+			if (typeof window.wagramPrivacyApply === 'function') { window.wagramPrivacyApply(privOf(), next); }
+			if (typeof window.wagramPrivacyRevealSet === 'function') {
+				window.wagramPrivacyRevealSet(next).then(function () { setTimeout(refresh, 80); });
+			}
+			if (state && state.prefs) {
+				if ('privacyReveal' in state.prefs) { state.prefs.privacyReveal = next; }
+				state.prefs.PrivacyReveal = next;
+			}
+			render();
+		});
+		panel.appendChild(reveal);
 
 		var ren = el('div', 'act');
 		ren.appendChild(el('span', 'gl', '✎'));
