@@ -226,6 +226,7 @@ const accountOverlayScript = `
 		panel.addEventListener('click', function (ev) { ev.stopPropagation(); });
 		if (mode === 'rename') { renderRename(panel); }
 		else if (mode === 'confirm') { renderConfirm(panel); }
+		else if (mode === 'settings') { renderSettings(panel); }
 		else { renderList(panel); }
 		root.appendChild(panel);
 		anchorPanel(panel);
@@ -280,6 +281,37 @@ const accountOverlayScript = `
 			panel.appendChild(add);
 		});
 
+		var set = el('div', 'act');
+		set.appendChild(el('span', 'gl', '⚙'));
+		set.appendChild(el('span', 'nm', 'Settings'));
+		set.addEventListener('click', function () { mode = 'settings'; render(); });
+		panel.appendChild(set);
+
+		var ren = el('div', 'act');
+		ren.appendChild(el('span', 'gl', '✎'));
+		ren.appendChild(el('span', 'nm', 'Rename this account'));
+		ren.addEventListener('click', function () { mode = 'rename'; render(); });
+		panel.appendChild(ren);
+
+		// The first account is the app's own profile and cannot be removed.
+		if (state && state.accounts.length && state.current !== state.accounts[0].id) {
+			var del = el('div', 'act danger');
+			del.appendChild(el('span', 'gl', '✕'));
+			del.appendChild(el('span', 'nm', 'Remove this account'));
+			del.addEventListener('click', function () { mode = 'confirm'; render(); });
+			panel.appendChild(del);
+		}
+	}
+
+	function renderSettings(panel) {
+		panel.appendChild(el('div', 'hdr', 'Settings'));
+		var back = el('div', 'act');
+		back.appendChild(el('span', 'gl', '‹'));
+		back.appendChild(el('span', 'nm', 'Back'));
+		back.addEventListener('click', function () { mode = 'list'; render(); });
+		panel.appendChild(back);
+
+		var view = prefsOf();
 		var toggle = el('div', 'viewrow');
 		toggle.appendChild(el('span', 'gl', view === 'pages' ? '▦' : '▤'));
 		toggle.appendChild(el('span', 'nm', view === 'pages' ? 'View: Pages (switch to Tabs)' : 'View: Tabs (switch to Pages)'));
@@ -372,21 +404,6 @@ const accountOverlayScript = `
 			render();
 		});
 		panel.appendChild(reveal);
-
-		var ren = el('div', 'act');
-		ren.appendChild(el('span', 'gl', '✎'));
-		ren.appendChild(el('span', 'nm', 'Rename this account'));
-		ren.addEventListener('click', function () { mode = 'rename'; render(); });
-		panel.appendChild(ren);
-
-		// The first account is the app's own profile and cannot be removed.
-		if (state && state.accounts.length && state.current !== state.accounts[0].id) {
-			var del = el('div', 'act danger');
-			del.appendChild(el('span', 'gl', '✕'));
-			del.appendChild(el('span', 'nm', 'Remove this account'));
-			del.addEventListener('click', function () { mode = 'confirm'; render(); });
-			panel.appendChild(del);
-		}
 	}
 
 	function renderRename(panel) {
