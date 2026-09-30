@@ -218,6 +218,7 @@ func Run() int {
 
 	w.Init(initScript)
 	w.Init(accountOverlayScript)
+	w.Init(privacyScript(loadPrefs()))
 	w.Navigate(serviceURL(ensureAccount(profileID).Service))
 	w.Run()
 
