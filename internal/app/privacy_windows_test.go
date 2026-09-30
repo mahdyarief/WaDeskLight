@@ -71,3 +71,13 @@ func TestPrivacyScriptSubstitutesTokens(t *testing.T) {
 		t.Fatal("script must contain the CSS")
 	}
 }
+
+func TestPrivacyScriptKeepsLiveRevealOnShortcut(t *testing.T) {
+	s := privacyScript(prefs{})
+	if strings.Contains(s, "apply(next, bootstrap.reveal)") {
+		t.Fatal("the shortcut must not reapply the baked reveal; it must keep the live one")
+	}
+	if !strings.Contains(s, "html.getAttribute('data-wagdl-reveal')") {
+		t.Fatal("the shortcut must read the current reveal from the attribute")
+	}
+}

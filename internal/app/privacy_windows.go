@@ -52,7 +52,8 @@ const privacyBlurScriptTemplate = `(function () {
 			ev.preventDefault();
 			ev.stopPropagation();
 			var next = html.getAttribute('data-wagdl-privacy') !== 'on';
-			apply(next, bootstrap.reveal);
+			var cur = html.getAttribute('data-wagdl-reveal');
+			apply(next, cur);
 			if (typeof window.wagramPrivacySet === 'function') {
 				window.wagramPrivacySet(next);
 			}
