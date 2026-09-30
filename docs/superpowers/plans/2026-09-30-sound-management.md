@@ -169,18 +169,21 @@ git commit -m "Add per-account volume state to the accounts"
 
 ---
 
-### Task 2: Apply the level in the audio package
+### Task 2: Apply the level and wire it through the app
 
 **Files:**
 - Modify: `internal/audio/audio_windows.go`
 - Test: `internal/audio/volume_windows_test.go` (create)
+- Modify: `internal/app/app_windows.go:178` (the `StartLabeler` call site)
+- Modify: `internal/app/bindings_windows.go` (add two bindings and the `audio` import)
 
 **Interfaces:**
-- Consumes: nothing from Task 1 (the audio package stays independent of `app`).
+- Consumes: `effectiveVolume(account) int`, `setAccountVolume`, `setAccountMuted` (Task 1); `serviceLabel(Service) string`, `gProfileID`, `mutateAccounts`, `loadAccounts`.
 - Produces:
   - `func StartLabeler(label string, volumePercent int)` — signature change; the old call `audio.StartLabeler()` no longer compiles.
   - `func SetVolume(percent int)`
   - `var volPercent atomic.Int32`, `func clampPercent(p int) int`
+  - page globals `window.wagramVolumeSet(percent)` and `window.wagramVolumeMute(on)`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -386,28 +389,9 @@ func StartLabeler(label string, volumePercent int) {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `go test ./internal/audio/ -run 'Clamp|SetVolume' -v`
-Expected: PASS (2 tests). The package does not compile yet if the `app` caller still passes no arguments — that is expected until Task 3; to run just this test use `go vet ./internal/audio/` and the test command above, which builds only the `audio` package.
+Expected: PASS (2 tests). The `app` package does not compile until Step 5 updates the caller; run only the audio package tests for this step (`go test ./internal/audio/`), which builds just that package.
 
-- [ ] **Step 5: Commit**
-
-```bash
-git add internal/audio/audio_windows.go internal/audio/volume_windows_test.go
-git commit -m "Set the audio session volume from the labeler loop"
-```
-
----
-
-### Task 3: Wire the level through the app
-
-**Files:**
-- Modify: `internal/app/app_windows.go:178` (the `StartLabeler` call site)
-- Modify: `internal/app/bindings_windows.go` (add two bindings and the `audio` import)
-
-**Interfaces:**
-- Consumes: `StartLabeler(label string, volumePercent int)`, `SetVolume(percent int)` (Task 2); `effectiveVolume(account) int`, `setAccountVolume`, `setAccountMuted` (Task 1); `serviceLabel(Service) string`, `gProfileID`, `mutateAccounts`, `loadAccounts`.
-- Produces: page globals `window.wagramVolumeSet(percent)` and `window.wagramVolumeMute(on)`.
-
-- [ ] **Step 1: Update the startup call site**
+- [ ] **Step 5: Update the startup call site**
 
 In `internal/app/app_windows.go`, change the line
 
@@ -423,7 +407,7 @@ to
 
 (`acct` is the local from `Run()` at line 108; it is in scope here.)
 
-- [ ] **Step 2: Add the bindings**
+- [ ] **Step 6: Add the bindings**
 
 In `internal/app/bindings_windows.go`, add the audio import so the import block reads:
 
@@ -468,12 +452,12 @@ Then, immediately after the `wagramPrivacyRevealSet` binding, add:
 	})
 ```
 
-- [ ] **Step 3: Build and vet**
+- [ ] **Step 7: Build and vet**
 
 Run: `go build ./... && go vet ./...`
 Expected: exit 0, no output.
 
-- [ ] **Step 4: Verify the bindings land on the page**
+- [ ] **Step 8: Verify the bindings land on the page**
 
 With the debug port enabled (temporary `--remote-debugging-port=9222` appended to the WebView2 flags), run the app and evaluate in the page:
 
@@ -483,22 +467,22 @@ typeof window.wagramVolumeSet + "," + typeof window.wagramVolumeMute
 
 Expected: `"function,function"`. Then call `window.wagramVolumeSet(40)` and confirm `accounts.json` shows `"volume": 40` for the current account (`%APPDATA%\WaGramDeskLite\accounts.json`).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add internal/app/app_windows.go internal/app/bindings_windows.go
-git commit -m "Expose volume bindings and pass the level to the labeler"
+git add internal/audio/audio_windows.go internal/audio/volume_windows_test.go internal/app/app_windows.go internal/app/bindings_windows.go
+git commit -m "Apply the per-account volume to the audio sessions"
 ```
 
 ---
 
-### Task 4: The Volume row in the panel
+### Task 3: The Volume row in the panel
 
 **Files:**
 - Modify: `internal/app/overlay_windows.go` (helpers, one CSS rule, one row in `renderList`)
 
 **Interfaces:**
-- Consumes: `window.wagramVolumeSet`, `window.wagramVolumeMute` (Task 3); the `accounts` snapshot entries now carry `volume` and `muted`.
+- Consumes: `window.wagramVolumeSet`, `window.wagramVolumeMute` (Task 2); the `accounts` snapshot entries now carry `volume` and `muted`.
 - Produces: nothing consumed by later tasks.
 
 - [ ] **Step 1: Add the CSS**
@@ -609,18 +593,18 @@ git commit -m "Add the per-account Volume row to the panel"
 
 **Spec coverage:**
 - "all audio from the account's web view" → Task 2 applies `SetMasterVolume` to the whole session. ✅
-- "per-account level stored in accounts.json" → Task 1 fields + Task 3 writes via `mutateAccounts`. ✅
+- "per-account level stored in accounts.json" → Task 1 fields + Task 2 writes via `mutateAccounts`. ✅
 - "WASAPI per-session master volume" → Task 2. ✅
 - `StartLabeler(label, volumePercent)` / `SetVolume` → Task 2. ✅
-- session label per-account instead of hard-coded "WhatsApp" → Task 3 call site (`serviceLabel + " - " + name`). ✅
-- Volume row in the main panel after `⚙ Settings`, stepper −/+, icon mute → Task 4. ✅
-- helpers `volOf`/`mutedOf`/`currentAccount` → Task 4. ✅
-- bindings `wagramVolumeSet`/`wagramVolumeMute` → Task 3. ✅
-- edge cases (session-not-yet-created, device change, 0 vs muted, nil default, startup application) → Task 2 loop re-applies on every scan and after `releaseMixer`; Task 3 passes the startup level. ✅
+- session label per-account instead of hard-coded "WhatsApp" → Task 2 call site (`serviceLabel + " - " + name`). ✅
+- Volume row in the main panel after `⚙ Settings`, stepper −/+, icon mute → Task 3. ✅
+- helpers `volOf`/`mutedOf`/`currentAccount` → Task 3. ✅
+- bindings `wagramVolumeSet`/`wagramVolumeMute` → Task 2. ✅
+- edge cases (session-not-yet-created, device change, 0 vs muted, nil default, startup application) → Task 2 loop re-applies on every scan and after `releaseMixer`; Task 2 also passes the startup level. ✅
 - unit tests (`accountVolume` nil→100 + clamp, `setAccountVolume`, `effectiveVolume`) → Task 1. ✅
-- live checks (CDP row + WASAPI read-back) → Task 3 step 4, Task 4 step 5. ✅
+- live checks (CDP row + WASAPI read-back) → Task 2 step 8, Task 3 step 5. ✅
 - out of scope items are not implemented. ✅
 
 **Placeholder scan:** no TBD/TODO; every code step carries the full code.
 
-**Type consistency:** `accountVolume`/`setAccountVolume`/`accountMuted`/`setAccountMuted`/`effectiveVolume` (Task 1) are used unchanged in Task 3; `clampPercent`/`volPercent`/`SetVolume`/`wait`/`applyVolume` (Task 2) are used unchanged in Tasks 2–3; `volOf`/`mutedOf`/`currentAccount`/`stepVolume` (Task 4) match the spec. `StartLabeler(label string, volumePercent int)` matches between Task 2 and Task 3.
+**Type consistency:** `accountVolume`/`setAccountVolume`/`accountMuted`/`setAccountMuted`/`effectiveVolume` (Task 1) are used unchanged in Task 2; `clampPercent`/`volPercent`/`SetVolume`/`wait`/`applyVolume` (Task 2) are used unchanged within Task 2; `volOf`/`mutedOf`/`currentAccount`/`stepVolume` (Task 3) match the spec. `StartLabeler(label string, volumePercent int)` is defined and called within Task 2.
