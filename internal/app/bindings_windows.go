@@ -54,6 +54,16 @@ func registerBindings(w webview2.WebView, hwnd uintptr) {
 		// the eco-QoS handoff need it; hop over before touching them.
 		procPostMessageW.Call(hwnd, wmApplyLite, 0, 0)
 	})
+	_ = w.Bind("wagramPrivacySet", func(on bool) {
+		p := loadPrefs()
+		setPrivacyEnabled(&p, on)
+		savePrefs(p)
+	})
+	_ = w.Bind("wagramPrivacyRevealSet", func(mode string) {
+		p := loadPrefs()
+		setPrivacyReveal(&p, mode)
+		savePrefs(p)
+	})
 
 	_ = w.Bind("wagramAccountsState", func() accountsView {
 		return accountsView{Current: gProfileID, Accounts: loadAccounts(), Prefs: loadPrefs()}
