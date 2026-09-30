@@ -48,7 +48,7 @@ func TestPrivacyCSSIsGatedAndHasThreeModes(t *testing.T) {
 	css := privacyCSS()
 	for _, want := range []string{
 		`html[data-wagdl-privacy="on"]`,
-		`#main .message-in`,
+		`#main [data-testid="msg-container"]`,
 		`#pane-side`,
 		`data-wagdl-reveal="hover"`,
 		`data-wagdl-reveal="click"`,

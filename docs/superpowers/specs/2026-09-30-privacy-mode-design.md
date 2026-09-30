@@ -237,40 +237,43 @@ reaching WhatsApp/Telegram shortcuts.
 
 ## Selectors per service
 
-### WhatsApp (verified against current DOM references)
+### WhatsApp (verified against the live DOM)
 
 Blur is applied to **bounded containers**, not to every text node inside them:
 the same element that blurs must be the one that sharpens, so hover and click
 reveal stay consistent (a blurred child inside a sharpened parent, or vice
 versa, reads as a glitch). Gated under `html[data-wagdl-privacy="on"]`:
 
-- `#main .message-in`, `#main .message-out` — message bubbles (text and any
+- `#main [data-testid="msg-container"]` — message bubbles (text and any
   media inside them).
-- `#main > header` — conversation header (name + avatar).
-- `#pane-side div[role="listitem"]` — chat list rows (avatar + name + preview).
+- `#main [data-testid="conversation-header"]` — conversation header (name +
+  avatar).
+- `#pane-side [data-testid="cell-frame-container"]` — chat list rows (avatar +
+  name + preview).
 
-Stable anchors: `#main` and `#pane-side` are stable element IDs; `.message-in` /
-`.message-out` and `div[role="listitem"]` are long-lived. WhatsApp's hashed class
+Stable anchors: `#main` and `#pane-side` are stable element IDs; the
+`data-testid` values (`msg-container`, `conversation-header`,
+`cell-frame-container`) are WhatsApp's own long-lived hooks, so its hashed class
 names are not relied upon. The full-screen media viewer (opened by clicking an
 image) lives outside these containers and is a known gap for v1.
 
-### Telegram `/a/` (requires a live-DOM verification step)
+### Telegram `/a/` (verified against the live DOM)
 
 Telegram has two incompatible web clients, `/k/` and `/a/`; the app navigates to
 `https://web.telegram.org/a/`. The `/a/` client is a React app whose class names
-are generated and offers no `role="listitem"` equivalent, so it cannot use the
-same anchors as WhatsApp.
+are generated, so it cannot use the same anchors as WhatsApp.
 
-Strategy: target the message bubbles, the conversation header, and the chat list
-rows structurally, rather than by generated class name. Because the exact
-generated names must be read from the running page, the implementation plan
-includes an explicit step: open Telegram Web in the app, inspect the live DOM,
-and fill in the actual selectors for those categories. This is a required
-implementation step, not a placeholder — the shipped code must contain concrete
-selectors, and the no-match-means-no-blur rule keeps a stale selector harmless.
+The shipped selectors, read from the running page and confirmed to blur live:
 
-If no Telegram selector can be found for a category, that category is simply not
-blurred on Telegram; WhatsApp is unaffected.
+- `#MiddleColumn .Message` — message bubbles.
+- `#MiddleColumn .MiddleHeader` — conversation header.
+- `.chat-list .ListItem.Chat` — chat list rows.
+
+`#MiddleColumn` is a stable element ID and `.chat-list` is the left column's
+stable container; the class names (`Message`, `MiddleHeader`, `ListItem Chat`)
+are Telegram's own, not generated hashes. The no-match-means-no-blur rule keeps a
+stale selector harmless: if none of these matches, that category is simply not
+blurred on Telegram and WhatsApp is unaffected.
 
 ## Data flow
 

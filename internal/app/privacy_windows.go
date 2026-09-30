@@ -64,16 +64,18 @@ const privacyBlurScriptTemplate = `(function () {
 	else { document.addEventListener('DOMContentLoaded', init); }
 })();`
 
-// WhatsApp anchors. #main and #pane-side are stable element IDs; .message-in /
-// .message-out and role="listitem" are long-lived, so WhatsApp's hashed classes
-// are not relied upon. Only bounded containers are listed: the same element that
-// blurs must be the one that sharpens.
-const whatsappPrivacySelectors = `#main .message-in, #main .message-out, #main > header, #pane-side div[role="listitem"]`
+// WhatsApp anchors, verified against the live web.whatsapp.com DOM. #main and
+// #pane-side are stable element IDs; the data-testid values (msg-container,
+// conversation-header, cell-frame-container) are WhatsApp's own long-lived
+// hooks, so its hashed class names are not relied upon. Only bounded containers
+// are listed: the same element that blurs must be the one that sharpens.
+const whatsappPrivacySelectors = `#main [data-testid="msg-container"], #main [data-testid="conversation-header"], #pane-side [data-testid="cell-frame-container"]`
 
-// Telegram /a/ anchors. Best-effort: the /a/ client is React with generated
-// class names and no role="listitem" equivalent. These are confirmed against the
-// live DOM in Task 6; a stale selector degrades to "no blur", never an error.
-const telegramPrivacySelectors = `#column-center .Message, #column-center .ChatInfo, .chatlist .chatlist-chat`
+// Telegram /a/ anchors, verified against the live web.telegram.org/a/ DOM.
+// #MiddleColumn is a stable element ID and .chat-list is the left column's
+// stable container; the class names (Message, MiddleHeader, ListItem Chat) are
+// Telegram's own, not generated hashes. Only bounded containers are listed.
+const telegramPrivacySelectors = `#MiddleColumn .Message, #MiddleColumn .MiddleHeader, .chat-list .ListItem.Chat`
 
 // privacySelectors is the blended list for both services. Both sets ship in
 // every document; the set that does not match the loaded page does nothing.
