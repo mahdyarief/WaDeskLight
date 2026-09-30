@@ -43,6 +43,10 @@ const accountOverlayScript = `
 		'.viewrow { display: flex; align-items: center; gap: 8px; padding: 8px 10px;',
 		'  border-radius: 6px; cursor: pointer; color: #d1d7db; }',
 		'.viewrow:hover { background: #2a3942; }',
+		'.step { padding: 0 6px; border-radius: 4px; background: #2a3942; color: #d1d7db;',
+		'  cursor: pointer; font-weight: 700; }',
+		'.step:hover { background: #3b4a54; }',
+		'.volsteps { margin-left: auto; display: flex; gap: 4px; }',
 		'.msg { padding: 8px 10px; color: #8696a0; line-height: 1.45; }',
 		'input { width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 6px;',
 		'  border: 1px solid #2a3942; background: #111b21; color: #e9edef;',
@@ -105,6 +109,38 @@ const accountOverlayScript = `
 			if (v === 'hover' || v === 'click') { return v; }
 		}
 		return 'hard';
+	}
+
+	function currentAccount() {
+		if (!state || !state.accounts) { return null; }
+		for (var i = 0; i < state.accounts.length; i++) {
+			if (state.accounts[i].id === state.current) { return state.accounts[i]; }
+		}
+		return null;
+	}
+
+	function volOf() {
+		var a = currentAccount();
+		return a && typeof a.volume === 'number' ? a.volume : 100;
+	}
+
+	function mutedOf() {
+		var a = currentAccount();
+		return !!(a && a.muted);
+	}
+
+	function stepVolume(delta) {
+		var a = currentAccount();
+		if (!a) { return; }
+		var next = (typeof a.volume === 'number' ? a.volume : 100) + delta;
+		if (next < 0) { next = 0; }
+		if (next > 100) { next = 100; }
+		// Adjusting the level while muted also unmutes, so the change is audible.
+		if (typeof window.wagramVolumeMute === 'function' && a.muted) { window.wagramVolumeMute(false); }
+		if (typeof window.wagramVolumeSet === 'function') { window.wagramVolumeSet(next); }
+		a.volume = next;
+		a.muted = false;
+		render();
 	}
 
 	function mount() {
@@ -286,6 +322,28 @@ const accountOverlayScript = `
 		set.appendChild(el('span', 'nm', 'Settings'));
 		set.addEventListener('click', function () { mode = 'settings'; render(); });
 		panel.appendChild(set);
+
+		var volRow = el('div', 'viewrow');
+		var volIcon = el('span', 'gl', mutedOf() ? '🔇' : '🔊');
+		volIcon.addEventListener('click', function (ev) {
+			ev.stopPropagation();
+			var on = !mutedOf();
+			if (typeof window.wagramVolumeMute === 'function') { window.wagramVolumeMute(on); }
+			var a = currentAccount();
+			if (a) { a.muted = on; }
+			render();
+		});
+		volRow.appendChild(volIcon);
+		volRow.appendChild(el('span', 'nm', mutedOf() ? 'Volume: Muted' : 'Volume: ' + volOf() + '%'));
+		var steps = el('div', 'volsteps');
+		var minus = el('span', 'step', '−');
+		minus.addEventListener('click', function (ev) { ev.stopPropagation(); stepVolume(-10); });
+		var plus = el('span', 'step', '+');
+		plus.addEventListener('click', function (ev) { ev.stopPropagation(); stepVolume(10); });
+		steps.appendChild(minus);
+		steps.appendChild(plus);
+		volRow.appendChild(steps);
+		panel.appendChild(volRow);
 
 		var ren = el('div', 'act');
 		ren.appendChild(el('span', 'gl', '✎'));
