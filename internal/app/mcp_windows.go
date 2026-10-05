@@ -82,7 +82,13 @@ func startMCPServer(w webview2.WebView) {
 // on first use. Keeping it (rather than rotating per launch) lets an agent's
 // config keep working across restarts.
 func persistentToken() string {
-	path := filepath.Join(getConfigDir(), "mcp-token")
+	// Each account gets its own token so an agent bound to one account's
+	// endpoint cannot reuse its credential against another account's endpoint.
+	name := "mcp-token"
+	if gProfileID != defaultProfileID {
+		name = "mcp-token-" + gProfileID
+	}
+	path := filepath.Join(getConfigDir(), name)
 	if b, err := os.ReadFile(path); err == nil {
 		if t := strings.TrimSpace(string(b)); t != "" {
 			return t
@@ -179,6 +185,8 @@ func (s *mcpServer) callTool(params json.RawMessage) any {
 		return s.agentTool("open_chat", p.Arguments)
 	case "read_messages":
 		return s.agentTool("read_messages", p.Arguments)
+	case "conversation_summary":
+		return s.agentTool("conversation_summary", p.Arguments)
 	case "send_message":
 		return s.agentTool("send_message", p.Arguments)
 	case "export_chat":
@@ -276,6 +284,16 @@ func mcpTools() []map[string]any {
 				"type": "object",
 				"properties": map[string]any{
 					"limit": map[string]any{"type": "integer", "description": "Maximum number of recent messages to return."},
+				},
+			},
+		},
+		{
+			"name":        "conversation_summary",
+			"description": "Summarize the open conversation for reply decisions: last message, whether the last message is incoming (should_reply), incoming vs outgoing counts, and the full message list as context.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"limit": map[string]any{"type": "integer", "description": "Maximum number of recent messages to include in the summary."},
 				},
 			},
 		},

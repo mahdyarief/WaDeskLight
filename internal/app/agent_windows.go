@@ -447,6 +447,35 @@ const agentScript = `
 		});
 	};
 
+	// Summarize the open conversation for the reply flow: the last message,
+	// whether a reply is warranted (last message is incoming), and the
+	// incoming vs outgoing split. The full message list is returned too so
+	// the caller has complete context instead of re-reading on its own.
+	AGENT.conversation_summary = function (args) {
+		var limit = (args && args.limit) ? args.limit : 50;
+		var r = AGENT.read_messages({ limit: limit });
+		function summarize(msgs) {
+			msgs = msgs || [];
+			var incoming = 0, outgoing = 0;
+			for (var i = 0; i < msgs.length; i++) {
+				if (msgs[i].outgoing) { outgoing++; } else { incoming++; }
+			}
+			var last = msgs.length ? msgs[msgs.length - 1] : null;
+			return {
+				total: msgs.length,
+				incoming_count: incoming,
+				outgoing_count: outgoing,
+				last_message: last,
+				should_reply: !!(last && !last.outgoing),
+				messages: msgs
+			};
+		}
+		if (r && typeof r.then === 'function') {
+			return r.then(function (v) { return summarize((v && v.messages) || []); });
+		}
+		return summarize((r && r.messages) || []);
+	};
+
 	// Give React a tick to register the typed text (and enable the send
 	// button) before clicking, then confirm the composer emptied, which is
 	// the real signal that the message left.
