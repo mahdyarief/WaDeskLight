@@ -219,6 +219,9 @@ func Run() int {
 	w.Init(initScript)
 	w.Init(accountOverlayScript)
 	w.Init(privacyScript(loadPrefs()))
+	w.Init(agentScript)
+	startMCPServer(w)
+	startScheduler(w)
 	w.Navigate(serviceURL(ensureAccount(profileID).Service))
 	w.Run()
 

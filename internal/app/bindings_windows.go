@@ -142,4 +142,40 @@ func registerBindings(w webview2.WebView, hwnd uintptr) {
 			quitInstance(hwnd)
 		})
 	})
+	// The injected agent answers Go->JS requests through this binding.
+	_ = w.Bind("wagramAgentReply", agentReply)
+
+	// Export takes the messages the page already scraped, so the binding only
+	// writes a file and never blocks on the UI thread.
+	_ = w.Bind("wagramExportWrite", func(format, dataJSON string) string {
+		path, err := writeExport(format, []byte(dataJSON))
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		return path
+	})
+
+	_ = w.Bind("wagramQuickRepliesState", func() []quickReply {
+		return loadQuickReplies()
+	})
+	_ = w.Bind("wagramQuickReplySave", func(token, text string) []quickReply {
+		list := saveQuickReply(token, text)
+		pushQuickReplies(w)
+		return list
+	})
+	_ = w.Bind("wagramQuickReplyDelete", func(token string) []quickReply {
+		list := deleteQuickReply(token)
+		pushQuickReplies(w)
+		return list
+	})
+
+	_ = w.Bind("wagramScheduleState", func() []scheduledMessage {
+		return loadScheduled()
+	})
+	_ = w.Bind("wagramScheduleAdd", func(text string, sendAtUnix int64) []scheduledMessage {
+		return addScheduled(text, sendAtUnix)
+	})
+	_ = w.Bind("wagramScheduleDelete", func(id string) []scheduledMessage {
+		return deleteScheduled(id)
+	})
 }
