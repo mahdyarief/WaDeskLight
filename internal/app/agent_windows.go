@@ -100,6 +100,19 @@ const agentScript = `
 		if (m) { return m[1].trim(); }
 		return s.replace(/^\d+\s+unread messages?\s+/i, '').trim();
 	}
+	// WhatsApp selects a chat on pointer/mouse-down, not on a bare click, so a
+	// synthetic click() alone is ignored. Dispatch the whole sequence and let
+	// it bubble to the row's handler.
+	function fireClick(el) {
+		if (!el) { return; }
+		try { el.scrollIntoView({ block: 'center' }); } catch (e) {}
+		var opts = { bubbles: true, cancelable: true, view: window, detail: 1 };
+		try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch (e) {}
+		try { el.dispatchEvent(new MouseEvent('mousedown', opts)); } catch (e) {}
+		try { el.dispatchEvent(new PointerEvent('pointerup', opts)); } catch (e) {}
+		try { el.dispatchEvent(new MouseEvent('mouseup', opts)); } catch (e) {}
+		try { el.dispatchEvent(new MouseEvent('click', opts)); } catch (e) {}
+	}
 	function host() { return location.host || ''; }
 	function isWA() { return host().indexOf('whatsapp') !== -1; }
 	function isTG() { return host().indexOf('telegram') !== -1; }
@@ -194,7 +207,7 @@ const agentScript = `
 			var nameEl = r.querySelector('[data-testid="cell-frame-title"]') || r.querySelector('span[title]') || r.querySelector('.title') || r.querySelector('.user-title');
 			var name = stripUnread(txt(nameEl));
 			if (name.toLowerCase() === want || name.toLowerCase().indexOf(want) !== -1) {
-				r.click();
+				fireClick(r.closest('[role="button"]') || r);
 				return { opened: true, name: name };
 			}
 		}
