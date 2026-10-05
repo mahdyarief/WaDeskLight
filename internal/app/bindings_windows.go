@@ -169,6 +169,18 @@ func registerBindings(w webview2.WebView, hwnd uintptr) {
 		return "opened"
 	})
 
+	// Webhook endpoints: the overlay lists configured URLs page-side and pairs
+	// them with add/delete, just like quick replies.
+	_ = w.Bind("wagramWebhooksState", func() []string {
+		return loadWebhooks()
+	})
+	_ = w.Bind("wagramWebhookAdd", func(url string) []string {
+		return addWebhook(url)
+	})
+	_ = w.Bind("wagramWebhookDelete", func(url string) []string {
+		return deleteWebhook(url)
+	})
+
 	_ = w.Bind("wagramQuickRepliesState", func() []quickReply {
 		return loadQuickReplies()
 	})

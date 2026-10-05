@@ -266,6 +266,7 @@ const accountOverlayScript = `
 		else if (mode === 'export') { renderExport(panel); }
 		else if (mode === 'quickreplies') { renderQuickReplies(panel); }
 		else if (mode === 'scheduler') { renderScheduler(panel); }
+		else if (mode === 'webhooks') { renderWebhooks(panel); }
 		else { renderList(panel); }
 		root.appendChild(panel);
 		anchorPanel(panel);
@@ -470,7 +471,8 @@ const accountOverlayScript = `
 		var tools = [
 			['⬇', 'Export chat', 'export'],
 			['⚡', 'Quick replies', 'quickreplies'],
-			['⏱', 'Scheduled messages', 'scheduler']
+			['⏱', 'Scheduled messages', 'scheduler'],
+			['🔗', 'Webhooks', 'webhooks']
 		];
 		tools.forEach(function (t) {
 			var row = el('div', 'viewrow');
@@ -559,6 +561,44 @@ const accountOverlayScript = `
 		panel.appendChild(btns);
 		if (typeof window.wagramQuickRepliesState === 'function') {
 			window.wagramQuickRepliesState().then(show);
+		}
+	}
+
+	function renderWebhooks(panel) {
+		subBack(panel, 'Webhooks');
+		var listBox = el('div', '');
+		panel.appendChild(listBox);
+		var show = function (list) {
+			listBox.textContent = '';
+			if (!list || !list.length) { listBox.appendChild(el('div', 'msg', 'No webhooks yet. Incoming messages are POSTed to these URLs.')); return; }
+			list.forEach(function (url) {
+				var row = el('div', 'viewrow');
+				row.appendChild(el('span', 'gl', '🔗'));
+				row.appendChild(el('span', 'nm', url));
+				var del = el('button', '', '×');
+				del.addEventListener('click', function (ev) {
+					ev.stopPropagation();
+					window.wagramWebhookDelete(url).then(show);
+				});
+				row.appendChild(del);
+				listBox.appendChild(row);
+			});
+		};
+		var input = document.createElement('input');
+		input.placeholder = 'https://example.com/hook';
+		panel.appendChild(input);
+		var btns = el('div', 'btns');
+		var add = el('button', 'go', 'Add');
+		add.addEventListener('click', function () {
+			window.wagramWebhookAdd(input.value.trim()).then(function (list) {
+				input.value = '';
+				show(list);
+			});
+		});
+		btns.appendChild(add);
+		panel.appendChild(btns);
+		if (typeof window.wagramWebhooksState === 'function') {
+			window.wagramWebhooksState().then(show);
 		}
 	}
 

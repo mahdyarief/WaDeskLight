@@ -222,6 +222,7 @@ func Run() int {
 	w.Init(agentScript)
 	startMCPServer(w)
 	startScheduler(w)
+	startWebhookWatcher(w)
 	w.Navigate(serviceURL(ensureAccount(profileID).Service))
 	w.Run()
 
