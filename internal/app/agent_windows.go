@@ -157,6 +157,71 @@ const agentScript = `
 		return false;
 	}
 
+	// The left-pane search filters the chat list and also surfaces contacts
+	// you have never chatted with, which is how a chat below the fold (or a
+	// brand-new one) becomes reachable. WhatsApp has changed this input
+	// repeatedly, so try the known hooks first and then fall back to "the
+	// contenteditable (or text input) that is not the composer".
+	function searchBox() {
+		var named = first([
+			'[data-testid="chat-list-search"]',
+			'#side div[contenteditable="true"][data-tab="3"]',
+			'div[aria-label="Search input textbox"]',
+			'input[aria-label="Search input textbox"]',
+			'#side input[type="text"]',
+			'#side input[type="search"]'
+		]);
+		if (named) { return named; }
+		var comp = composer();
+		var boxes = qa('div[contenteditable="true"]');
+		for (var i = 0; i < boxes.length; i++) {
+			if (boxes[i] !== comp) { return boxes[i]; }
+		}
+		var inputs = qa('input');
+		for (var j = 0; j < inputs.length; j++) {
+			var it = (inputs[j].type || '').toLowerCase();
+			if (it === 'text' || it === 'search') { return inputs[j]; }
+		}
+		return null;
+	}
+
+	// Type into a contenteditable editor or a native text input. WhatsApp's
+	// search is a plain <input> whose value must be written through the native
+	// setter so React notices the change; the composer is a contenteditable
+	// that takes execCommand. Returns what actually landed, for diagnostics.
+	function setBoxText(box, text) {
+		box.focus();
+		if (box.tagName === 'INPUT' || box.tagName === 'TEXTAREA') {
+			var proto = box.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+			var desc = Object.getOwnPropertyDescriptor(proto, 'value');
+			if (desc && desc.set) { desc.set.call(box, text); } else { box.value = text; }
+			box.dispatchEvent(new Event('input', { bubbles: true }));
+			return boxText(box);
+		}
+		var sel = window.getSelection();
+		var range = document.createRange();
+		range.selectNodeContents(box);
+		sel.removeAllRanges();
+		sel.addRange(range);
+		var ok = false;
+		try { ok = document.execCommand('insertText', false, text); } catch (e) {}
+		if (!ok || boxText(box) === '') {
+			try {
+				range.deleteContents();
+				range.insertNode(document.createTextNode(text));
+			} catch (e2) {
+				box.textContent = text;
+			}
+			try { box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text })); } catch (e3) {}
+		}
+		return boxText(box);
+	}
+
+	function boxText(box) {
+		var v = box.value !== undefined ? box.value : (box.innerText || box.textContent || '');
+		return (v || '').trim();
+	}
+
 	var AGENT = {};
 
 	AGENT.status = function () {
@@ -211,6 +276,13 @@ const agentScript = `
 				return { opened: true, name: name };
 			}
 		}
+		// Not visible: type it into the search box so the row renders, then
+		// the caller retries open_chat once the list has filtered.
+		var box = searchBox();
+		if (box) {
+			setBoxText(box, args.name);
+			return { opened: false, searched: true, name: args.name };
+		}
 		return { opened: false, name: (args && args.name) || '' };
 	};
 
@@ -228,7 +300,7 @@ const agentScript = `
 			var r = rows[i];
 			var body = r.querySelector('.selectable-text') || r.querySelector('[data-testid="msg-text"]') || r.querySelector('.text-content');
 			var meta = r.querySelector('[data-testid="msg-meta"]') || r.querySelector('.meta') || r.querySelector('.time');
-			var outgoing = !!r.querySelector('.message-out') || ('' + r.className).indexOf('message-out') !== -1;
+			var outgoing = !!r.closest('.message-out') || !!r.querySelector('.message-out');
 			out.push({ text: txt(body), time: txt(meta), outgoing: outgoing });
 		}
 		return { messages: out };

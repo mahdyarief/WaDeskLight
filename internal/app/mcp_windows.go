@@ -52,21 +52,45 @@ type mcpServer struct {
 	token string
 }
 
+// mcpListenAddr is the fixed loopback address the endpoint binds to, so an
+// agent's config stays valid across launches. If it is already taken (a second
+// account, or another app), the server falls back to a random free port and
+// records the actual address in the discovery file.
+const mcpListenAddr = "127.0.0.1:5987"
+
 var mcpStartOnce sync.Once
 
 // startMCPServer launches the loopback MCP endpoint once per process.
 func startMCPServer(w webview2.WebView) {
 	mcpStartOnce.Do(func() {
-		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		ln, err := net.Listen("tcp", mcpListenAddr)
 		if err != nil {
-			return
+			ln, err = net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				return
+			}
 		}
-		srv := &mcpServer{w: w, token: randomToken()}
+		srv := &mcpServer{w: w, token: persistentToken()}
 		mux := http.NewServeMux()
 		mux.HandleFunc("/mcp", srv.handle)
 		go func() { _ = http.Serve(ln, mux) }()
 		writeMCPEndpoint(ln.Addr().String(), srv.token)
 	})
+}
+
+// persistentToken returns this machine's MCP token, generating and storing one
+// on first use. Keeping it (rather than rotating per launch) lets an agent's
+// config keep working across restarts.
+func persistentToken() string {
+	path := filepath.Join(getConfigDir(), "mcp-token")
+	if b, err := os.ReadFile(path); err == nil {
+		if t := strings.TrimSpace(string(b)); t != "" {
+			return t
+		}
+	}
+	t := randomToken()
+	_ = os.WriteFile(path, []byte(t), 0600)
+	return t
 }
 
 func randomToken() string {

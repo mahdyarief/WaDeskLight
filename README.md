@@ -73,7 +73,7 @@ The tray menu carries the same account list as a shortcut, so you can switch wit
 
 Each running window also exposes a **Model Context Protocol (MCP)** server on a
 loopback HTTP port, so an AI agent can list chats, read the open conversation,
-and send a message through the same UI. The endpoint URL and a per-launch bearer
+and send a message through the same UI. The endpoint URL and a persistent bearer
 token are written to `%APPDATA%\WaGramDeskLite\mcp.json`. See
 [docs/MCP.md](docs/MCP.md) for the token model, the tool list, and how to connect
 a client.
