@@ -144,10 +144,18 @@ const agentScript = `
 		range.selectNodeContents(box);
 		sel.removeAllRanges();
 		sel.addRange(range);
+		// Lexical does not honour the selection on execCommand('insertText'),
+		// so leftover text gets appended to instead of replaced. Clear the box
+		// explicitly before typing; the first pass is the keyboard path and
+		// the second pass covers any residual DOM the editor left behind.
+		try { document.execCommand('delete'); } catch (e) {}
+		try { range.deleteContents(); } catch (e) {}
+		if (boxText(box) !== '') { box.textContent = ''; }
 		document.execCommand('insertText', false, text);
-		// execCommand normally fires input for us, but re-dispatch it so React's
-		// controlled state definitely sees the text and the send button lights up.
-		try { box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text })); } catch (e) {}
+		// execCommand fires its own input event, which is enough for React to
+		// enable the send button. Do not re-dispatch a synthetic event whose
+		// data carries the text: Lexical reads event.data from it and inserts
+		// the text a second time, turning "test" into "testtest".
 		return true;
 	}
 
