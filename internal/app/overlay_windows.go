@@ -502,8 +502,9 @@ const accountOverlayScript = `
 					result.textContent = 'Open a chat first.';
 					return;
 				}
-				var data = window.wagramAgent.readMessages(500);
-				window.wagramExportWrite(fmt.toLowerCase(), data).then(function (path) {
+				window.wagramAgent.readMessages(500).then(function (data) {
+					return window.wagramExportWrite(fmt.toLowerCase(), data);
+				}).then(function (path) {
 					result.textContent = path;
 				});
 			});

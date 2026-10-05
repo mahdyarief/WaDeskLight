@@ -137,21 +137,39 @@ const agentScript = `
 		sel.removeAllRanges();
 		sel.addRange(range);
 		document.execCommand('insertText', false, text);
+		// execCommand normally fires input for us, but re-dispatch it so React's
+		// controlled state definitely sees the text and the send button lights up.
+		try { box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text })); } catch (e) {}
 		return true;
 	}
 
-	function clickSend() {
-		var btn = first([
+	function sendButton() {
+		return first([
 			'[data-testid="send"]',
 			'button[aria-label="Send"]',
 			'button[aria-label="Kirim"]',
+			'button[aria-label="Send message"]',
+			'button[aria-label="Kirim pesan"]',
 			'span[data-icon="send"]',
 			'button.send'
 		]);
-		if (btn) { btn.click(); return true; }
+	}
+
+	// WhatsApp's send button reacts to the full pointer sequence rather than a
+	// bare click(), the same way its chat rows do. When no button is in the DOM
+	// yet, fall back to a complete Enter press on the composer.
+	function clickSend() {
+		var btn = sendButton();
+		if (btn) {
+			fireClick(btn.closest('button') || btn);
+			return true;
+		}
 		var box = composer();
 		if (box) {
-			box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+			var opts = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
+			try { box.dispatchEvent(new KeyboardEvent('keydown', opts)); } catch (e) {}
+			try { box.dispatchEvent(new KeyboardEvent('keypress', opts)); } catch (e) {}
+			try { box.dispatchEvent(new KeyboardEvent('keyup', opts)); } catch (e) {}
 			return true;
 		}
 		return false;
@@ -286,30 +304,142 @@ const agentScript = `
 		return { opened: false, name: (args && args.name) || '' };
 	};
 
-	AGENT.read_messages = function (args) {
-		var limit = (args && args.limit) ? args.limit : 50;
-		var rows = all([
-			'[data-testid="msg-container"]',
+	// WhatsApp's current build drops the message-in/message-out classes and
+	// marks each text bubble with data-pre-plain-text instead, so try that
+	// first and fall back to the older hooks. Take whichever selector yields
+	// the most rows rather than the first that matches anything.
+	function messageRows() {
+		var sels = [
+			'[data-pre-plain-text]',
 			'div.message-in, div.message-out',
+			'[data-testid="msg-container"]',
 			'.MessageList .message',
 			'.bubbles .message'
-		]);
+		];
+		var best = [];
+		for (var i = 0; i < sels.length; i++) {
+			var els = qa(sels[i]);
+			if (els.length > best.length) { best = els; }
+		}
+		return best;
+	}
+
+	function isScrollable(el) {
+		if (!el || el.scrollHeight <= el.clientHeight + 20) { return false; }
+		var oy = '';
+		try { oy = window.getComputedStyle(el).overflowY; } catch (e) {}
+		return oy === 'auto' || oy === 'scroll';
+	}
+
+	function scrollableWithin(root) {
+		if (!root) { return null; }
+		if (isScrollable(root)) { return root; }
+		var nodes = root.querySelectorAll('div');
+		for (var i = 0; i < nodes.length; i++) {
+			if (isScrollable(nodes[i])) { return nodes[i]; }
+		}
+		return null;
+	}
+
+	function messageScroller() {
+		var found = scrollableWithin(q('[data-testid="conversation-panel-messages"]'));
+		if (found) { return found; }
+		return scrollableWithin(q('#main'));
+	}
+
+	// Direction is marked by the bubble tail icon: tail-out for a message we
+	// sent, tail-in for one we received. Walk up from the text node until an
+	// ancestor owns a tail, which is the message row.
+	function rowOutgoing(el) {
+		var node = el;
+		for (var i = 0; i < 12 && node; i++) {
+			var out = node.querySelectorAll ? node.querySelectorAll('[data-icon="tail-out"]').length : 0;
+			var inn = node.querySelectorAll ? node.querySelectorAll('[data-icon="tail-in"]').length : 0;
+			if (out + inn > 0) { return out >= inn; }
+			node = node.parentElement;
+		}
+		return false;
+	}
+
+	// The bubble's own timestamp is embedded in data-pre-plain-text as
+	// "[14:37, 10/5/2026] sender: "; fall back to the meta node.
+	function rowTime(el) {
+		var ptt = el.getAttribute ? (el.getAttribute('data-pre-plain-text') || '') : '';
+		var m = ptt.match(/^\[(\d{1,2}:\d{2})/);
+		if (m) { return m[1]; }
+		var meta = el.querySelector('[data-testid="msg-meta"]') || el.querySelector('.meta') || el.querySelector('.time');
+		return txt(meta);
+	}
+
+	function msgSig(r) {
+		var body = r.querySelector('.selectable-text') || r.querySelector('[data-testid="msg-text"]') || r.querySelector('.text-content');
+		return txt(body) + '\u0001' + rowTime(r);
+	}
+
+	function collectMessages(rows, limit) {
 		var out = [];
 		var start = Math.max(0, rows.length - limit);
 		for (var i = start; i < rows.length; i++) {
 			var r = rows[i];
 			var body = r.querySelector('.selectable-text') || r.querySelector('[data-testid="msg-text"]') || r.querySelector('.text-content');
-			var meta = r.querySelector('[data-testid="msg-meta"]') || r.querySelector('.meta') || r.querySelector('.time');
-			var outgoing = !!r.closest('.message-out') || !!r.querySelector('.message-out');
-			out.push({ text: txt(body), time: txt(meta), outgoing: outgoing });
+			out.push({ text: txt(body || r), time: rowTime(r), outgoing: rowOutgoing(r) });
 		}
-		return { messages: out };
+		return out;
+	}
+
+	// Read the open conversation. WhatsApp keeps only a window of message rows
+	// in the DOM, so when the caller wants more than is rendered we scroll the
+	// pane toward the top, accumulating rows until we have enough or run out.
+	AGENT.read_messages = function (args) {
+		var limit = (args && args.limit) ? args.limit : 50;
+		var scroller = messageScroller();
+		if (!scroller) {
+			return { messages: collectMessages(messageRows(), limit) };
+		}
+		return new Promise(function (resolve) {
+			var seen = {};
+			var acc = [];
+			function snapshot() {
+				var rows = messageRows();
+				for (var i = rows.length - 1; i >= 0; i--) {
+					var r = rows[i];
+					var sig = msgSig(r);
+					if (!seen[sig]) { seen[sig] = 1; acc.push(r); }
+				}
+			}
+			var steps = 0;
+			function step() {
+				snapshot();
+				if (acc.length >= limit || steps >= 12) {
+					scroller.scrollTop = scroller.scrollHeight;
+					acc.reverse();
+					resolve({ messages: collectMessages(acc, limit) });
+					return;
+				}
+				scroller.scrollTop = Math.max(0, scroller.scrollTop - scroller.clientHeight);
+				steps++;
+				setTimeout(step, 250);
+			}
+			step();
+		});
 	};
 
+	// Give React a tick to register the typed text (and enable the send
+	// button) before clicking, then confirm the composer emptied, which is
+	// the real signal that the message left.
 	AGENT.send_message = function (args) {
 		if (!args || !args.text) { throw new Error('text required'); }
 		setComposer(args.text);
-		return { sent: clickSend() };
+		return new Promise(function (resolve) {
+			setTimeout(function () {
+				var clicked = clickSend();
+				setTimeout(function () {
+					var box = composer();
+					var left = box ? boxText(box) : '';
+					resolve({ sent: clicked && left === '', remaining: left });
+				}, 150);
+			}, 150);
+		});
 	};
 
 	AGENT.composer_set = function (args) {
@@ -338,23 +468,36 @@ const agentScript = `
 			try { quickReplies = JSON.parse(json) || {}; } catch (e) { quickReplies = {}; }
 		},
 		readMessages: function (limit) {
-			try { return JSON.stringify(AGENT.read_messages({ limit: limit })); }
-			catch (e) { return '{"messages":[]}'; }
+			try {
+				var r = AGENT.read_messages({ limit: limit });
+				if (r && typeof r.then === 'function') {
+					return r.then(function (v) { return JSON.stringify(v); },
+						function () { return '{"messages":[]}'; });
+				}
+				return Promise.resolve(JSON.stringify(r));
+			} catch (e) { return Promise.resolve('{"messages":[]}'); }
 		},
 		setComposer: function (text) {
 			try { setComposer(text); return true; } catch (e) { return false; }
 		},
 		call: function (id, fn, argsJson) {
-			var result;
+			function reply(result) {
+				try { window.wagramAgentReply(id, JSON.stringify(result)); } catch (e2) {}
+			}
 			try {
 				var f = AGENT[fn];
 				if (typeof f !== 'function') { throw new Error('unknown agent fn: ' + fn); }
 				var args = argsJson ? JSON.parse(argsJson) : {};
-				result = { ok: true, value: f(args) };
+				var r = f(args);
+				if (r && typeof r.then === 'function') {
+					r.then(function (v) { reply({ ok: true, value: v }); },
+						function (e) { reply({ ok: false, error: String((e && e.message) || e) }); });
+				} else {
+					reply({ ok: true, value: r });
+				}
 			} catch (e) {
-				result = { ok: false, error: String((e && e.message) || e) };
+				reply({ ok: false, error: String((e && e.message) || e) });
 			}
-			try { window.wagramAgentReply(id, JSON.stringify(result)); } catch (e2) {}
 		}
 	};
 
