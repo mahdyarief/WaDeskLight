@@ -22,16 +22,21 @@ The server is implemented with the Go standard library only
 
 ## Where the token comes from
 
-The token is generated once and then **persisted**, so an agent's config keeps
-working across restarts. On first launch `persistentToken()` in
-`internal/app/mcp_windows.go` writes it to `%APPDATA%\WaGramDeskLite\mcp-token`
-(mode `0600`); every later launch reads that file back instead of rotating.
+Each account gets its own token, so an agent bound to one account's endpoint
+cannot reuse its credential against another account's. The token is generated
+once and then **persisted**, so an agent's config keeps working across
+restarts. On first launch `persistentToken()` in `internal/app/mcp_windows.go`
+writes the default account's token to `%APPDATA%\WaGramDeskLite\mcp-token`
+and an additional account's token to `mcp-token-<profile-id>` (both mode
+`0600`); every later launch reads that file back instead of rotating.
 
 - The token itself is 24 bytes drawn from `crypto/rand`, hex-encoded — a
   48-character hex string.
-- To see the current token, read `mcp-token`, or the `token` field of the
-  discovery file below (both hold the same value).
-- To rotate it, delete `mcp-token` and restart the app; a new one is generated.
+- To see the current token, read the account's token file (`mcp-token` for
+  the default account, `mcp-token-<profile-id>` for another), or the `token`
+  field of its discovery file below (both hold the same value).
+- To rotate it, delete the account's token file and restart the app; a new
+  one is generated for that account.
 
 If `crypto/rand` ever fails, the fallback is the process start time in
 nanoseconds — still unique, but the normal path is the random one.
@@ -42,15 +47,15 @@ The window records its URL and token so an agent can find it. The file is
 written with mode `0600` (readable only by your user) under
 `%APPDATA%\WaGramDeskLite\`:
 
-| Account | File |
-|---|---|
-| First account (default profile) | `mcp.json` |
-| Additional accounts | `mcp-<profile-id>.json` |
-| The persistent token (all accounts) | `mcp-token` |
+| Account | Discovery file | Token file |
+|---|---|---|
+| First account (default profile) | `mcp.json` | `mcp-token` |
+| Additional accounts | `mcp-<profile-id>.json` | `mcp-token-<profile-id>` |
 
-One file per account keeps concurrent windows from overwriting each other. The
-port is fixed, so `mcp.json` only changes if the fixed port was taken and the
-window fell back to a random one.
+One file per account keeps concurrent windows from overwriting each other, and
+each account authenticates with its own token. The port is fixed, so `mcp.json`
+only changes if the fixed port was taken and the window fell back to a random
+one; an additional account always gets its own free port.
 
 Contents:
 
@@ -75,6 +80,7 @@ cat "$APPDATA/WaGramDeskLite/mcp.json"
 | `list_chats` | none | Visible chats with `name`, `preview`, `unread`, `active` |
 | `open_chat` | `name` (string, required) | Opens the matching chat, so `read_messages` and `send_message` target it |
 | `read_messages` | `limit` (integer, default 50) | Recent messages of the open conversation: `text`, `time`, `outgoing` |
+| `conversation_summary` | `limit` (integer, default 50) | Reply-decision data for the open conversation: `total`, `incoming_count`, `outgoing_count`, `last_message`, `should_reply` (true when the last message is incoming), plus the full `messages` list |
 | `send_message` | `text` (string, required) | Sends `text` in the open conversation |
 | `export_chat` | `limit` (integer) | Same shape as `read_messages`, intended for export |
 
@@ -113,7 +119,9 @@ curl -s -X POST "$URL" \
 
 The port is fixed (`5987`) and the token is persisted, so an agent's config can
 be written once and keep working across restarts. Read `mcp.json` if the fixed
-port was taken and the window fell back to a random one. The app must be running
+port was taken and the window fell back to a random one. For an additional
+account, read `mcp-<profile-id>.json` instead — its port is a free random one
+and its token comes from `mcp-token-<profile-id>`. The app must be running
 for the endpoint to exist.
 
 ### HTTP transport (Claude Desktop, Cursor, and other remote-MCP clients)

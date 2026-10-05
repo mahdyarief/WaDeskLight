@@ -505,7 +505,15 @@ const accountOverlayScript = `
 				window.wagramAgent.readMessages(500).then(function (data) {
 					return window.wagramExportWrite(fmt.toLowerCase(), data);
 				}).then(function (path) {
-					result.textContent = path;
+					if (path.indexOf('error:') === 0) {
+						result.textContent = path;
+						return;
+					}
+					var name = path.split(/[\\/]/).pop();
+					result.textContent = 'Exported: ' + name;
+					if (typeof window.wagramExportReveal === 'function') {
+						window.wagramExportReveal(path);
+					}
 				});
 			});
 			btns.appendChild(b);

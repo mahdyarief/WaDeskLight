@@ -3,6 +3,8 @@
 package app
 
 import (
+	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/jchv/go-webview2"
@@ -153,6 +155,18 @@ func registerBindings(w webview2.WebView, hwnd uintptr) {
 			return "error: " + err.Error()
 		}
 		return path
+	})
+
+	// Reveal opens Explorer with the exported file selected, so the overlay can
+	// show a short confirmation instead of the long absolute path.
+	_ = w.Bind("wagramExportReveal", func(path string) string {
+		if path == "" {
+			return "no path"
+		}
+		if err := exec.Command("explorer.exe", "/select,"+strconv.Quote(path)).Start(); err != nil {
+			return "error: " + err.Error()
+		}
+		return "opened"
 	})
 
 	_ = w.Bind("wagramQuickRepliesState", func() []quickReply {
