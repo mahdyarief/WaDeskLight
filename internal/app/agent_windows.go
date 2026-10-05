@@ -268,6 +268,7 @@ const agentScript = `
 
 	AGENT.list_chats = function () {
 		var rows = all([
+			'#pane-side div[data-id]',
 			'[data-testid="cell-frame-container"]',
 			'#pane-side [role="listitem"]',
 			'.chat-list .ListItem',
@@ -279,10 +280,22 @@ const agentScript = `
 			var nameEl = r.querySelector('[data-testid="cell-frame-title"]') || r.querySelector('span[title]') || r.querySelector('.title') || r.querySelector('.user-title');
 			var prevEl = r.querySelector('[data-testid="cell-frame-secondary"]') || r.querySelector('.preview') || r.querySelector('.last-message');
 			var unreadEl = r.querySelector('[data-testid="icon-unread-count"]') || r.querySelector('.unread') || r.querySelector('.badge');
+			var idAttr = r.getAttribute('data-id');
+			if (!idAttr && r.closest) {
+				var anc = r.closest('[data-id]');
+				if (anc) { idAttr = anc.getAttribute('data-id'); }
+			}
+			if (!idAttr) {
+				var idNode = r.querySelector('[data-id]');
+				if (idNode) { idAttr = idNode.getAttribute('data-id'); }
+			}
+			var av = r.querySelector('img');
 			out.push({
 				name: stripUnread(txt(nameEl)),
 				preview: txt(prevEl),
 				unread: txt(unreadEl),
+				id: idAttr || '',
+				avatar: av ? av.getAttribute('data-plain-text') || av.src || '' : '',
 				active: r.getAttribute('aria-selected') === 'true' || ('' + r.className).indexOf('active') !== -1
 			});
 		}
@@ -297,10 +310,13 @@ const agentScript = `
 		var out = [];
 		var chats = (r && r.chats) || [];
 		for (var i = 0; i < chats.length; i++) {
-			var n = parseInt(chats[i].unread, 10);
-			if (n > 0) {
-				out.push({ name: chats[i].name, preview: chats[i].preview, unread: n });
-			}
+			out.push({
+				id: chats[i].id || '',
+				name: chats[i].name,
+				preview: chats[i].preview,
+				avatar: chats[i].avatar || '',
+				unread: parseInt(chats[i].unread, 10) || 0
+			});
 		}
 		return { chats: out };
 	};

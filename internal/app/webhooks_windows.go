@@ -97,66 +97,89 @@ func startWebhookWatcher(w webview2.WebView) {
 	webhookOnce.Do(func() {
 		go func() {
 			seen := map[string]int{}
+			primed := false
 			ticker := time.NewTicker(5 * time.Second)
 			defer ticker.Stop()
 			for range ticker.C {
-				pollIncoming(w, seen)
+				primed = pollIncoming(w, seen, primed)
 			}
 		}()
 	})
 }
 
-func pollIncoming(w webview2.WebView, seen map[string]int) {
+func pollIncoming(w webview2.WebView, seen map[string]int, primed bool) bool {
 	urls := loadWebhooks()
 	if len(urls) == 0 {
-		return
+		return primed
 	}
 	val, err := callAgentString(w, "incoming_events")
 	if err != nil {
-		return
+		return primed
 	}
 	var res struct {
 		Chats []struct {
+			ID      string `json:"id"`
 			Name    string `json:"name"`
 			Preview string `json:"preview"`
+			Avatar  string `json:"avatar"`
 			Unread  int    `json:"unread"`
 		} `json:"chats"`
 	}
 	if err := json.Unmarshal([]byte(val), &res); err != nil {
-		return
+		return primed
+	}
+	// First poll only records the baseline so messages that were already
+	// unread before launch are not replayed. Wait for a real chat list before
+	// priming, otherwise an empty list while the page loads would make every
+	// existing unread chat look like a fresh event on the next poll.
+	if !primed {
+		if len(res.Chats) == 0 {
+			return false
+		}
+		for _, c := range res.Chats {
+			seen[chatKey(c.ID, c.Name, c.Avatar)] = c.Unread
+		}
+		return true
 	}
 	now := time.Now()
-	found := map[string]bool{}
 	for _, c := range res.Chats {
-		found[c.Name] = true
-		prev, ok := seen[c.Name]
-		if ok && c.Unread <= prev {
-			continue
-		}
-		seen[c.Name] = c.Unread
+		key := chatKey(c.ID, c.Name, c.Avatar)
+		prev, ok := seen[key]
 		if !ok {
-			// First sight after start: record the baseline, do not replay
-			// messages that were already unread before the app launched.
-			continue
+			// A chat that was not visible before (or was unread 0) now has a
+			// fresh unread badge, so this is a new incoming message.
+			prev = 0
 		}
-		postWebhooks(urls, map[string]any{
-			"event":   "message.incoming",
-			"account": gAccountName,
-			"profile": gProfileID,
-			"service": gServiceBadge,
-			"chat":    c.Name,
-			"text":    c.Preview,
-			"unread":  c.Unread,
-			"time":    now.Format("15:04"),
-		})
-	}
-	// Chats that are no longer unread leave the seen table, so the next
-	// message on them fires a fresh event.
-	for name := range seen {
-		if !found[name] {
-			delete(seen, name)
+		if c.Unread > prev {
+			postWebhooks(urls, map[string]any{
+				"event":   "message.incoming",
+				"account": gAccountName,
+				"profile": gProfileID,
+				"service": gServiceBadge,
+				"chat":    c.Name,
+				"text":    c.Preview,
+				"unread":  c.Unread,
+				"time":    now.Format("15:04"),
+			})
 		}
+		seen[key] = c.Unread
 	}
+	// A chat that drops out of the poll is just scrolled out of the virtualized
+	// DOM list, not read — keep its last unread count so it does not refire the
+	// same event when it scrolls back in.
+	return true
+}
+
+// chatKey returns the stable identity for a chat row: the DOM data-id when the
+// page exposes one, otherwise a composite of display name and avatar URL. Two
+// chats can share a display name (duplicate group names), and two chats can
+// share an avatar URL (same group photo), so neither alone is unique — but the
+// pair keeps every row in the chat list distinguishable.
+func chatKey(id, name, avatar string) string {
+	if id != "" {
+		return id
+	}
+	return name + "\x00" + avatar
 }
 
 // callAgentString runs an agent function and returns its value as a JSON
@@ -167,9 +190,9 @@ func callAgentString(w webview2.WebView, fn string) (string, error) {
 		return "", err
 	}
 	var env struct {
-		OK    bool   `json:"ok"`
-		Value string `json:"value"`
-		Error string `json:"error"`
+		OK    bool            `json:"ok"`
+		Value json.RawMessage `json:"value"`
+		Error string          `json:"error"`
 	}
 	if err := json.Unmarshal(res, &env); err != nil {
 		return string(res), err
@@ -177,7 +200,7 @@ func callAgentString(w webview2.WebView, fn string) (string, error) {
 	if !env.OK {
 		return "", fmt.Errorf("%s", env.Error)
 	}
-	return env.Value, nil
+	return string(env.Value), nil
 }
 
 // postWebhooks sends one event to every configured URL, non-blocking, with a
