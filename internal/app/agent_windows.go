@@ -93,12 +93,20 @@ const agentScript = `
 	}
 	function txt(el) { return el ? (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim() : ''; }
 	// WhatsApp's chat rows expose an accessibility label like
-	// "23 unread messages Marketplace 23"; strip the count off both ends.
+	// "23 unread messages Marketplace 23". The current build runs the count
+	// and the mute/bell icon ligature text straight into the name
+	// ("101 unread messagesGeneralic-notifications-off101"), so strip the
+	// leading "N unread message(s)", any trailing icon + repeated count, and
+	// any stray variation selectors left behind by emoji in the name.
 	function stripUnread(s) {
 		s = (s || '').trim();
-		var m = s.match(/^\d+\s+unread messages?\s+(.*?)\s+\d+$/i);
-		if (m) { return m[1].trim(); }
-		return s.replace(/^\d+\s+unread messages?\s+/i, '').trim();
+		var m = s.match(/^\d+\s+unread\s+messages?\s*(.*)$/i);
+		if (!m) { return s; }
+		return m[1]
+			.replace(/(?:\s*ic-[a-z0-9-]*)+\s*\d*$/i, '')
+			.replace(/\s+\d+$/, '')
+			.replace(/^[\s\uFE0E\uFE0F]+/, '')
+			.replace(/[\s\uFE0E\uFE0F]+$/, '');
 	}
 	// WhatsApp selects a chat on pointer/mouse-down, not on a bare click, so a
 	// synthetic click() alone is ignored. Dispatch the whole sequence and let
@@ -407,17 +415,24 @@ const agentScript = `
 					if (!seen[sig]) { seen[sig] = 1; acc.push(r); }
 				}
 			}
-			var steps = 0;
+			function finish() {
+				try { scroller.scrollTop = scroller.scrollHeight; } catch (e) {}
+				acc.reverse();
+				resolve({ messages: collectMessages(acc, limit) });
+			}
+			// Bound the loop by wall-clock time, not step count, so a busy page
+			// (each setTimeout delayed) can never push us past the RPC timeout.
+			// Any throw also resolves instead of hanging the request.
+			var started = Date.now();
 			function step() {
-				snapshot();
-				if (acc.length >= limit || steps >= 12) {
-					scroller.scrollTop = scroller.scrollHeight;
-					acc.reverse();
-					resolve({ messages: collectMessages(acc, limit) });
+				try {
+					snapshot();
+				} catch (e) {
+					finish();
 					return;
 				}
-				scroller.scrollTop = Math.max(0, scroller.scrollTop - scroller.clientHeight);
-				steps++;
+				if (acc.length >= limit || Date.now() - started > 3000) { finish(); return; }
+				try { scroller.scrollTop = Math.max(0, scroller.scrollTop - scroller.clientHeight); } catch (e2) {}
 				setTimeout(step, 250);
 			}
 			step();
