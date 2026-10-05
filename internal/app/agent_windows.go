@@ -289,6 +289,22 @@ const agentScript = `
 		return { chats: out };
 	};
 
+	// Report chats that currently carry an unread badge: name, preview of the
+	// newest message, and unread count. The Go side diffs this against what it
+	// already saw and fires webhooks only for the deltas.
+	AGENT.incoming_events = function () {
+		var r = AGENT.list_chats();
+		var out = [];
+		var chats = (r && r.chats) || [];
+		for (var i = 0; i < chats.length; i++) {
+			var n = parseInt(chats[i].unread, 10);
+			if (n > 0) {
+				out.push({ name: chats[i].name, preview: chats[i].preview, unread: n });
+			}
+		}
+		return { chats: out };
+	};
+
 	// Open a conversation by name so the tools that act on the open
 	// conversation (read_messages, send_message) can target it. Matching is
 	// case-insensitive and falls back to a substring hit.
