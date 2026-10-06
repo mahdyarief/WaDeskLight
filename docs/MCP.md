@@ -99,6 +99,186 @@ event stream: an agent detects incoming messages by polling `list_chats` (each
 row carries its `unread` count and last-message `preview`) and opening the ones
 that matter.
 
+## Incoming-message webhooks
+
+Each window can also push **incoming-message events** to your own HTTP
+endpoints, so you can wire the client into a bot, chat-ops, or automation
+pipeline without polling the MCP server.
+
+### Configuration
+
+Webhook URLs are stored in one file per machine, shared by all accounts:
+
+```text
+%APPDATA%\WaGramDeskLite\webhooks.json
+```
+
+They can also be managed from the app's overlay UI (same place as quick
+replies). Adding or deleting a URL takes effect on the next poll.
+
+### When an event fires
+
+A background watcher polls the chat list every **5 seconds**. When a chat's
+unread count goes *up*, the window POSTs an event to **every** configured URL.
+Messages that were already unread when the app started are recorded as a
+baseline and are *not* replayed.
+
+### Payload
+
+```json
+{
+  "event": "message.incoming",
+  "account": "Account 1",
+  "profile": "default",
+  "service": "WA",
+  "chat": "Contact Name",
+  "text": "ok",
+  "unread": 1,
+  "time": "21:43"
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `event` | Always `message.incoming` |
+| `account` / `profile` | Which account the message arrived in |
+| `service` | Service badge shown in the window (`WA` for WhatsApp) |
+| `chat` | Display name of the chat |
+| `text` | Preview (newest message) of the chat |
+| `unread` | Total unread count for that chat after the event |
+| `time` | Local time the event was detected (`HH:MM`) |
+
+### Verification headers
+
+Each request carries two headers so the receiver can verify it really came
+from this account and tell accounts apart:
+
+| Header | Value |
+|---|---|
+| `X-Wagram-Secret` | The account's **per-account** webhook secret |
+| `X-Wagram-Profile` | The profile id (`default`, or `<profile-id>`) |
+
+The secret is stored per account — `webhook-secret` for the default account,
+`webhook-secret-<profile-id>` for additional ones (same naming pattern as the
+MCP token) — so a receiver can reject requests that do not match. Rotate it by
+deleting the file and restarting the app.
+
+### Chat identity
+
+The watcher keeps its own unread baseline per chat. To tell chats apart it
+uses the DOM `data-id` when the page exposes one, otherwise a composite of the
+display name and the avatar URL. This keeps two chats that share a display
+name (duplicate group names) from clobbering each other's state.
+
+### Example receiver
+
+```python
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+class Hook(BaseHTTPRequestHandler):
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        print("secret:", self.headers.get("X-Wagram-Secret"))
+        print("profile:", self.headers.get("X-Wagram-Profile"))
+        print("event:", body.decode())
+        self.send_response(200)
+        self.end_headers()
+
+HTTPServer(("127.0.0.1", 9901), Hook).serve_forever()
+```
+
+## REST send API
+
+Besides MCP, the same loopback server exposes a plain REST endpoint for
+sending messages — handy for OTP flows, marketing automation, or any HTTP
+client that cannot speak MCP/JSON-RPC. Auth uses the same bearer token as
+`/mcp` (see `mcp.json`).
+
+### POST /api/send
+
+`multipart/form-data` with:
+
+| Field | Required | Meaning |
+|---|---|---|
+| `phone` | Yes | Destination number, digits with country code (e.g. `62812...`; `+`, spaces, dashes are stripped) |
+| `text` | One of text/file | Message text (also used as caption when a file is attached) |
+| `file` | One of text/file | Image or document to attach (max ~25 MB) |
+| `as` | No | `image`/`media` sends as photo, `document`/`file` as file attachment, `sticker` as sticker (auto by MIME type when empty) |
+
+### Humanizer (pacing)
+
+A send drives several UI steps in a row (open the attach menu, click the item,
+type the caption, press send). Firing them back-to-back looks robotic and, on a
+slow machine, races WhatsApp Web before the right file input has mounted — the
+classic symptom is a document arriving as a sticker. These optional knobs add a
+human-like pause to each step. Every value is **milliseconds** (0–60000), except
+`jitter`, which is a **0..1 fraction**; each pause is multiplied by a random
+factor up to `1 + jitter` so the gaps vary instead of marching in lockstep.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `base` | `1500` | Default pause for `open`/`item`/`send` when those are not set individually |
+| `delay` | — | Historical alias for `base` (still accepted) |
+| `open` | `base` | Pause before opening the attach (plus) menu |
+| `item` | `base` | Pause between clicking menu items while the matching file input mounts |
+| `send` | `base` | Pause after the attachment is staged, before pressing send |
+| `typing` | `0` | Per-character delay when typing the caption (0 types it in one shot) |
+| `jitter` | `0.6` | Random spread applied to every pause above (0 = fixed, 1 = up to 2×) |
+| `pace` | `0` | Server-side minimum gap between this send and the previous one; spreads a batch out instead of firing back-to-back |
+
+Omitted knobs fall back to the agent's defaults, so a plain request (no knobs)
+still paces itself at a sane rate. `pace` is enforced in Go, before the chat even
+opens: it sets a minimum gap between the start of one send and the next, so a
+batch spreads out over time.
+
+```bash
+# slow, deliberately human: 2 s base, wide jitter, typed caption, 3 s between sends
+curl -X POST "$BASE/api/send" -H "Authorization: Bearer $TOKEN" \
+  -F "phone=6281234567890" -F "as=document" -F "text=Report attached" \
+  -F "base=2000" -F "jitter=0.8" -F "typing=90" -F "send=2500" -F "pace=3000" \
+  -F "file=@report.pdf"
+```
+
+Behavior: the window opens the chat for `phone` by typing the number into the chat-list search box
+and clicking the first result, so the page is never reloaded. It then waits up to two 25 s rounds for
+the conversation panel to mount. Text-only goes as a chat message; when a file is attached, text rides
+along as its caption so both arrive as a single message. This changes the active chat in that window.
+
+The `as` value controls the resulting message type. `sticker` injects the file straight into
+WhatsApp's persistent sticker input. `media`/`image` and `document`/`file` open the attach (plus) menu,
+choose the matching item ("Photos & videos" or "Document"), and intercept the file input WhatsApp opens
+for that item, so the message is a photo or a file attachment respectively. An empty `as` picks media
+for image MIME types and document otherwise.
+
+Success (`200`):
+
+```json
+{ "ok": true, "phone": "62812...", "result": { "text": {...}, "file": {...} } }
+```
+
+Errors are JSON too: `400` (bad phone / nothing to send), `401`
+(unauthorized), `504` (chat did not open in time), `502` (agent error).
+
+Examples:
+
+```bash
+EP=$(cat "$APPDATA/WaGramDeskLite/mcp.json")
+BASE=$(echo "$EP" | python -c "import sys,json;print(json.load(sys.stdin)['url'])" | sed 's|/mcp$||')
+TOKEN=$(echo "$EP" | python -c "import sys,json;print(json.load(sys.stdin)['token'])")
+
+# text only (e.g. OTP)
+curl -X POST "$BASE/api/send" -H "Authorization: Bearer $TOKEN" \
+  -F "phone=6281234567890" -F "text=Your OTP is 123456"
+
+# image with caption
+curl -X POST "$BASE/api/send" -H "Authorization: Bearer $TOKEN" \
+  -F "phone=6281234567890" -F "text=Promo this week" -F "file=@promo.jpg"
+
+# document only
+curl -X POST "$BASE/api/send" -H "Authorization: Bearer $TOKEN" \
+  -F "phone=6281234567890" -F "file=@invoice.pdf"
+```
+
 ## Manual test
 
 With the app running and logged in:

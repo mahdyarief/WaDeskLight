@@ -15,6 +15,9 @@ import (
 
 // agentRequestTimeout bounds how long a Go->JS call waits for the page.
 const agentRequestTimeout = 8 * time.Second
+// agentRequestTimeoutLong bounds long-running agent calls (media upload and
+// send polling can legitimately take tens of seconds).
+const agentRequestTimeoutLong = 60 * time.Second
 
 var (
 	agentMu      sync.Mutex
@@ -46,6 +49,16 @@ func agentReply(id, result string) {
 // callAgent asks the page's injected agent to run fn with args and waits for
 // its JSON result. It must not be called from the UI thread.
 func callAgent(w webview2.WebView, fn string, args any) (json.RawMessage, error) {
+	return callAgentWithTimeout(w, fn, args, agentRequestTimeout)
+}
+
+// callAgentLong is callAgent with the long request timeout, for operations
+// that legitimately take tens of seconds (media upload + send polling).
+func callAgentLong(w webview2.WebView, fn string, args any) (json.RawMessage, error) {
+	return callAgentWithTimeout(w, fn, args, agentRequestTimeoutLong)
+}
+
+func callAgentWithTimeout(w webview2.WebView, fn string, args any, timeout time.Duration) (json.RawMessage, error) {
 	id := strconv.FormatInt(atomic.AddInt64(&agentSeq, 1), 10)
 	ch := make(chan string, 1)
 	agentMu.Lock()
@@ -66,7 +79,7 @@ func callAgent(w webview2.WebView, fn string, args any) (json.RawMessage, error)
 	select {
 	case res := <-ch:
 		return json.RawMessage(res), nil
-	case <-time.After(agentRequestTimeout):
+	case <-time.After(timeout):
 		agentMu.Lock()
 		delete(agentPending, id)
 		agentMu.Unlock()
@@ -528,6 +541,424 @@ const agentScript = `
 
 	AGENT.composer_set = function (args) {
 		return { ok: setComposer((args && args.text) || '') };
+	};
+
+	AGENT.composer_ready = function () {
+		return { ready: !!composer() };
+	};
+
+	// chat_open reports whether a real conversation panel is mounted.
+	// composer() alone is a false positive on the home screen: its loose
+	// selectors also match the search box (div[contenteditable][role=textbox]),
+	// which made the send flow race the SPA navigation and time out.
+	AGENT.chat_open = function () {
+		var strong = !!q('[data-testid="conversation-compose-box-input"]');
+		var footerBox = !!q('footer div[contenteditable="true"]');
+		return { open: strong || footerBox, strong: strong, footer: footerBox, href: location.href };
+	};
+
+	AGENT.page_state = function () {
+		return { href: location.href, title: document.title, ready: !!composer() };
+	};
+
+	// open_chat_phone opens a chat by phone number WITHOUT any navigation:
+	// it types the digits into the chat-list search box and clicks the first
+	// result row (for a phone-number search the direct conversation is always
+	// the top hit). The old deep-link approach (location.assign to
+	// /send?phone=) forces a full SPA reload and bounces back to home when
+	// the store is not ready, which the user sees as endless reloading.
+	// Note: rows show the contact NAME, never the number, so matching digits
+	// against row text cannot work — clicking the first row is the reliable
+	// signal.
+	AGENT.open_chat_phone = function (args) {
+		var phone = ((args && args.phone) || '').replace(/[^0-9]/g, '');
+		if (!phone) { return { navigated: false }; }
+		function isOpen() {
+			return !!q('[data-testid="conversation-compose-box-input"]') || !!q('footer div[contenteditable="true"]');
+		}
+		function rows() {
+			return all([
+				'[data-testid="cell-frame-container"]',
+				'#pane-side [role="listitem"]',
+				'.chat-list .ListItem',
+				'a.chat-item'
+			]);
+		}
+		function clickRow(row) {
+			fireClick(row.closest && row.closest('[role="button"]') ? row.closest('[role="button"]') : row);
+		}
+		return new Promise(function (resolve) {
+			function done(opened, via) {
+				try {
+					var box = searchBox();
+					if (box && boxText(box)) { setBoxText(box, ''); }
+				} catch (e) {}
+				resolve({ navigated: opened, opened: opened, via: via, phone: phone });
+			}
+			var box = searchBox();
+			if (!box) { resolve({ navigated: false, reason: 'no-search-box', phone: phone }); return; }
+			setBoxText(box, phone);
+			setTimeout(function () {
+				var list = rows();
+				if (!list.length) { done(false, 'search-no-results'); return; }
+				clickRow(list[0]);
+				setTimeout(function () { done(isOpen(), 'search-first'); }, 1200);
+			}, 1800);
+		});
+	};
+
+	// media_debug dumps live DOM state for diagnosing stuck media previews.
+	// args.clickAttach opens the attach (plus) menu and dumps the menu items.
+	// args.clickItem="<text>" also clicks a matching menu item (with the file
+	// input's own click() suppressed so no OS dialog opens) and reports which
+	// input accept string that item tried to open, plus any showOpenFilePicker
+	// calls (the File System Access API path modern WhatsApp Web may use).
+	AGENT.media_debug = function (args) {
+		function inputsDump() {
+			var out = [];
+			try {
+				var els = document.querySelectorAll('input[type="file"]');
+				for (var i = 0; i < els.length; i++) {
+					var par = els[i].closest('[role="menuitem"],[role="button"],button,[data-testid]');
+					out.push({
+						accept: els[i].getAttribute('accept') || '',
+						multiple: !!els[i].multiple,
+						files: (els[i].files ? els[i].files.length : 0),
+						par: par ? ((par.getAttribute('aria-label') || '') + '|' + (par.getAttribute('data-testid') || '')) : ''
+					});
+				}
+			} catch (e0) {}
+			return out;
+		}
+		function footerDump() {
+			var out = [];
+			try {
+				var btns = document.querySelectorAll('footer [role="button"],footer button');
+				for (var i = 0; i < btns.length && out.length < 30; i++) {
+					var ic = '';
+					try { var sp = btns[i].querySelector('span[data-icon]'); if (sp) { ic = sp.getAttribute('data-icon') || ''; } } catch (e1) {}
+					out.push({ aria: (btns[i].getAttribute('aria-label') || ''), tid: (btns[i].getAttribute('data-testid') || ''), icon: ic });
+				}
+			} catch (e2) {}
+			return out;
+		}
+		function menuDump() {
+			var out = [];
+			try {
+				var items = document.querySelectorAll('[role="menuitem"],[role="menu"] *,[data-testid^="mi-"]');
+				for (var i = 0; i < items.length && out.length < 40; i++) {
+					var t = (items[i].textContent || '').trim();
+					var al = items[i].getAttribute('aria-label') || '';
+					if (!t && !al) { continue; }
+					out.push({ tid: (items[i].getAttribute('data-testid') || ''), aria: al, text: t.slice(0, 40) });
+				}
+				// Attach-menu items may be plain div[role=button]/li rather than
+				// role=menuitem, so also scan those outside the footer.
+				var btns = document.querySelectorAll('div[role="button"],li');
+				for (var b = 0; b < btns.length && out.length < 60; b++) {
+					if (btns[b].closest && btns[b].closest('footer')) { continue; }
+					var bt = (btns[b].textContent || '').trim();
+					var ba = btns[b].getAttribute('aria-label') || '';
+					if (!ba && (!bt || bt.length > 40)) { continue; }
+					out.push({ tid: (btns[b].getAttribute('data-testid') || ''), aria: ba, text: bt.slice(0, 40) });
+				}
+			} catch (e3) {}
+			return out;
+		}
+		function base() {
+			var comp = composer();
+			return { href: location.href, title: document.title, inputs: inputsDump(), footer: footerDump(), menu: menuDump(), composer: comp ? txt(comp) : '' };
+		}
+		function findAttach() {
+			var btns = document.querySelectorAll('footer [role="button"],footer button');
+			for (var i = 0; i < btns.length; i++) {
+				var ic = '', al = (btns[i].getAttribute('aria-label') || '').toLowerCase();
+				try { var sp = btns[i].querySelector('span[data-icon]'); if (sp) { ic = sp.getAttribute('data-icon') || ''; } } catch (e) {}
+				if (ic === 'plus' || ic === 'plus-rounded' || al.indexOf('attach') !== -1 || al.indexOf('lampirkan') !== -1) { return btns[i]; }
+			}
+			return null;
+		}
+		if (!(args && args.clickAttach)) { return base(); }
+		var btn = findAttach();
+		var clickedAttach = false, clickMethod = '';
+		if (btn) { try { btn.click(); clickedAttach = true; clickMethod = 'native'; } catch (e4) {} }
+		var want = (args && args.clickItem) || '';
+		if (want) {
+			// Suppress the input's own click() so probing a menu item never
+			// opens a native OS file dialog, and record what it tried to open.
+			window.__dbgOrigInputClick = HTMLInputElement.prototype.click;
+			window.__dbgInputClicks = [];
+			HTMLInputElement.prototype.click = function () {
+				if (this.type === 'file') { window.__dbgInputClicks.push(this.getAttribute('accept') || ''); return; }
+				return window.__dbgOrigInputClick.apply(this, arguments);
+			};
+			window.__dbgOrigPicker = window.showOpenFilePicker;
+			window.__dbgPickerCalls = 0;
+			try { window.showOpenFilePicker = function () { window.__dbgPickerCalls++; return Promise.reject(new Error('blocked')); }; } catch (e5) {}
+		}
+		return new Promise(function (resolve) {
+			function finish(afterMenu, method, itemClicked) {
+				var want2 = (args && args.clickItem) || '';
+				if (!want2) { resolve({ clickedAttach: clickedAttach, clickMethod: method, afterMenu: afterMenu }); return; }
+				var itemHit = itemClicked || '';
+				var items = document.querySelectorAll('[role="menuitem"],[role="menu"] *,[data-testid^="mi-"],div[role="button"],li');
+				for (var j = 0; j < items.length; j++) {
+					if (items[j].closest && items[j].closest('footer')) { continue; }
+					var t = (items[j].textContent || '').toLowerCase();
+					var a = (items[j].getAttribute('aria-label') || '').toLowerCase();
+					if (t.indexOf(String(want2).toLowerCase()) !== -1 || a.indexOf(String(want2).toLowerCase()) !== -1) { try { fireClick(items[j]); itemHit = (items[j].textContent || items[j].getAttribute('aria-label') || '').trim().slice(0, 40); } catch (e6) {} break; }
+				}
+				setTimeout(function () {
+					var res = { clickedAttach: clickedAttach, clickMethod: method, clickItem: want2, itemClicked: itemHit, inputClickHits: window.__dbgInputClicks || [], pickerCalls: window.__dbgPickerCalls || 0, afterMenu: afterMenu, afterItem: base() };
+					try { HTMLInputElement.prototype.click = window.__dbgOrigInputClick; } catch (e7) {}
+					try { window.showOpenFilePicker = window.__dbgOrigPicker; } catch (e8) {}
+					resolve(res);
+				}, 1000);
+			}
+			setTimeout(function () {
+				var afterMenu = base();
+				// If the native click did not open a menu, try the full pointer
+				// sequence before giving up.
+				if (afterMenu.menu.length === 0 && btn) {
+					try { fireClick(btn); } catch (e9) {}
+					setTimeout(function () { finish(base(), 'native+fire', ''); }, 1200);
+					return;
+				}
+				finish(afterMenu, clickMethod, '');
+			}, 1200);
+		});
+	};
+
+	// send_media attaches one file (base64) to the open chat and sends it,
+	// with an optional text caption. Three modes:
+	//   sticker  - WhatsApp keeps a persistent input[accept="image/*"] in the
+	//              compose area; injecting an image there produces a sticker.
+	//   media    - open the attach menu and choose "Photos & videos".
+	//   document - open the attach menu and choose "Document".
+	// The menu items are div[role=button] with an aria-label. Choosing one makes
+	// WhatsApp open its own file input for that kind; we intercept the input's
+	// click() (or showOpenFilePicker) and hand it our File instead of the OS
+	// dialog, so the resulting message type matches the menu choice. Returns a
+	// Promise; the Go bridge unwraps it.
+	AGENT.send_media = function (args) {
+		var b64 = (args && args.data) || '';
+		var name = (args && args.filename) || 'upload.bin';
+		var mime = (args && args.mime) || 'application/octet-stream';
+		var caption = (args && args.caption) || '';
+		var asMode = ((args && args.as) || '').toLowerCase();
+		if (!b64) { return { sent: false, error: 'data required' }; }
+		var bin;
+		try { bin = atob(b64); } catch (e) { return { sent: false, error: 'bad base64' }; }
+		var bytes = new Uint8Array(bin.length);
+		for (var i = 0; i < bin.length; i++) { bytes[i] = bin.charCodeAt(i); }
+		var file;
+		try { file = new File([bytes], name, { type: mime }); }
+		catch (e) { return { sent: false, error: 'file ctor: ' + e }; }
+
+		var wantSticker = asMode === 'sticker';
+		var wantDoc = asMode === 'document' || asMode === 'file' || (asMode === '' && mime.indexOf('image/') !== 0);
+		// Humanizer. Each stage waits a configurable time, and every wait is
+		// jittered so the sequence of clicks does not look like a bot on a
+		// metronome. Callers tune it per request via args.humanizer:
+		//   base   - default for every stage below (ms)
+		//   jitter - random fraction added to each wait, 0..1
+		//   open   - pause before opening the attach menu (ms)
+		//   item   - pause before clicking the menu item, and between retries (ms)
+		//   send   - pause after the preview mounts, before clicking send (ms)
+		//   typing - per-character delay while typing the caption (ms, 0 = instant)
+		// args.delay is kept as a backward-compatible alias for base.
+		var hum = (args && args.humanizer) || {};
+		function hnum(v, d) { var n = parseInt(v, 10); return (isFinite(n) && n >= 0) ? n : d; }
+		var humBase = hnum((args && args.delay), hnum(hum.base, 1500));
+		var humJit = (hum.jitter === undefined || hum.jitter === null) ? 0.6 : Math.min(1, Math.max(0, parseFloat(hum.jitter) || 0));
+		var openMs = hnum(hum.open, humBase);
+		var itemMs = hnum(hum.item, humBase);
+		var sendMs = hnum(hum.send, humBase);
+		var typingMs = hnum(hum.typing, 0);
+		function jit(ms) { return ms > 0 ? ms + Math.floor(Math.random() * Math.ceil(ms * humJit)) : 0; }
+
+		function injectInto(input) {
+			var dt = new DataTransfer();
+			dt.items.add(file);
+			input.files = dt.files;
+			input.dispatchEvent(new Event('change', { bubbles: true }));
+		}
+		function attachBtn() {
+			var btns = document.querySelectorAll('footer [role="button"],footer button');
+			for (var i = 0; i < btns.length; i++) {
+				var ic = '', al = (btns[i].getAttribute('aria-label') || '').toLowerCase();
+				try { var sp = btns[i].querySelector('span[data-icon]'); if (sp) { ic = sp.getAttribute('data-icon') || ''; } } catch (e) {}
+				if (ic === 'ic-attach-file' || al === 'attach' || al.indexOf('lampirkan') !== -1) { return btns[i]; }
+			}
+			return null;
+		}
+		function menuItem(label) {
+			// Match only the attach-menu items, by their aria-label (the DOM
+			// probe confirmed they carry aria-label "Document" / "Photos &
+			// videos"). A textContent fallback matched document message bubbles
+			// already in the chat, so the menu never opened and the send stuck.
+			var els = document.querySelectorAll('div[role="button"],li,[role="menuitem"]');
+			var want = label.toLowerCase();
+			for (var j = 0; j < els.length; j++) {
+				if (els[j].closest && els[j].closest('footer')) { continue; }
+				var al = (els[j].getAttribute('aria-label') || '').toLowerCase();
+				if (al === want || al.indexOf(want) === 0) { return els[j]; }
+			}
+			return null;
+		}
+		function stickerInput() {
+			var els = document.querySelectorAll('input[type="file"]');
+			for (var i = 0; i < els.length; i++) {
+				var acc = (els[i].getAttribute('accept') || '').toLowerCase();
+				if (acc.indexOf('image') !== -1 && acc.indexOf('video') === -1) { return els[i]; }
+			}
+			return els.length ? els[0] : null;
+		}
+		// typeCaption types the caption one character at a time with a human
+		// per-key delay, then calls done. With typing off it inserts the whole
+		// string in one go.
+		function typeCaption(box, text, done) {
+			var i = 0;
+			(function step() {
+				if (i >= text.length) { done(); return; }
+				try { document.execCommand('insertText', false, text.charAt(i)); } catch (e) {}
+				i++;
+				setTimeout(step, typingMs + Math.floor(Math.random() * Math.ceil(typingMs * 0.5)));
+			})();
+		}
+		// pollSend waits for WhatsApp's media/document preview, inserts the
+		// caption once the caption box mounts, waits a human pause after the
+		// send button appears, clicks it, and resolves when the preview closes.
+		function pollSend(resolve, via) {
+			var tries = 0, clicked = false, btnSel = '', capDone = false, capBusy = false, seenAt = 0;
+			// One jittered send pause for this call, applied once the send
+			// button is on screen (so a big upload is not clicked too early).
+			var sendDelay = jit(sendMs);
+			// The poll window must outlast the send pause and any caption typing
+			// without hitting the RPC timeout.
+			var maxTries = 60 + Math.ceil((sendDelay + typingMs * caption.length) / 500);
+			var timer = setInterval(function () {
+				tries++;
+				if (caption && !capDone && !capBusy) {
+					var capBox = first(['div[aria-label="Add a caption"]', '[data-testid="media-caption-input"]', 'div[role="textbox"][aria-label*="caption"]']);
+					if (capBox) {
+						capBusy = true;
+						try {
+							capBox.focus();
+							try { document.execCommand('selectAll', false, null); } catch (eCap1) {}
+							if (typingMs > 0) {
+								typeCaption(capBox, caption, function () { capBusy = false; capDone = true; });
+							} else {
+								document.execCommand('insertText', false, caption);
+								capBusy = false; capDone = true;
+							}
+						} catch (eCap) { capBusy = false; capDone = true; }
+					}
+				}
+				var btn = first([
+					'[data-testid="send"]',
+					'div[role="button"][aria-label="Send"]',
+					'button[aria-label="Send"]',
+					'button[aria-label="Kirim"]',
+					'span[data-icon="wds-ic-send-filled"]',
+					'span[data-icon="send"]'
+				]);
+				if (btn) {
+					if (!seenAt) { seenAt = Date.now(); }
+					// Do not send mid-typing, and let the preview settle first.
+					if (!capBusy && !clicked && Date.now() - seenAt >= sendDelay) {
+						var sels = ['[data-testid="send"]', 'div[role="button"][aria-label="Send"]', 'button[aria-label="Send"]', 'button[aria-label="Kirim"]', 'span[data-icon="wds-ic-send-filled"]', 'span[data-icon="send"]'];
+						for (var si = 0; si < sels.length; si++) { try { if (document.querySelector(sels[si])) { btnSel = sels[si]; break; } } catch (eSi) {} }
+						var el = btn.closest ? (btn.closest('[role="button"],button') || btn) : btn;
+						try { fireClick(el); } catch (e3) {}
+						clicked = true;
+					}
+				}
+				// The media-preview marker alone is not proof of completion (it
+				// is usually absent from the DOM), so also require the media
+				// send button to be gone.
+				var panelGone = !first([
+					'[data-testid="media-preview"]',
+					'[data-testid="preview"]',
+					'div[role="button"][aria-label="Send"]',
+					'span[data-icon="wds-ic-send-filled"]'
+				]);
+				if (clicked && panelGone && tries > 2) {
+					clearInterval(timer);
+					resolve({ sent: true, file: name, as: asMode, via: via });
+				}
+				if (tries > maxTries) {
+					clearInterval(timer);
+					resolve({ sent: false, file: name, stuck: true, clicked: clicked, btnSel: btnSel, as: asMode, via: via, tries: tries, dbg: { href: location.href, title: document.title } });
+				}
+			}, 500);
+		}
+
+		if (wantSticker) {
+			var sIn = stickerInput();
+			if (!sIn) { return { sent: false, error: 'sticker input not found' }; }
+			try { injectInto(sIn); } catch (e) { return { sent: false, error: 'inject: ' + e }; }
+			return new Promise(function (resolve) { pollSend(resolve, 'sticker:direct'); });
+		}
+
+		// media / document: open the attach menu and choose the matching item.
+		var label = wantDoc ? 'document' : 'photos';
+		var ab = attachBtn();
+		if (!ab) { return { sent: false, error: 'attach button not found' }; }
+		var origClick = HTMLInputElement.prototype.click;
+		var origPicker = window.showOpenFilePicker;
+		var injected = false, hits = [];
+		HTMLInputElement.prototype.click = function () {
+			if (this.type === 'file') {
+				hits.push(this.getAttribute('accept') || '');
+				if (!injected) { injected = true; try { injectInto(this); } catch (e) {} }
+				return;
+			}
+			return origClick.apply(this, arguments);
+		};
+		try { window.showOpenFilePicker = function () { return Promise.resolve([{ getFile: function () { return Promise.resolve(file); } }]); }; } catch (eP) {}
+		return new Promise(function (resolve) {
+			var waited = 0, opened = false;
+			function tryItem() {
+				var item = menuItem(label);
+				// Human pause first, then open the menu only when the item is
+				// not already on screen (a second attach click would close it).
+				if (!item && !opened) {
+					opened = true;
+					try { ab.click(); } catch (eA) {}
+					setTimeout(tryItem, jit(itemMs));
+					return;
+				}
+				// Wait for the menu to mount before clicking: a click on a
+				// not-yet-rendered item silently falls through to the sticker
+				// input, which sends a document as a sticker.
+				if (!item && waited < 8) { waited++; setTimeout(tryItem, jit(itemMs)); return; }
+				var itemHit = item ? (item.getAttribute('aria-label') || item.textContent || '').trim().slice(0, 40) : '';
+				if (item) { try { fireClick(item); } catch (eI) {} }
+				setTimeout(function () {
+					try { HTMLInputElement.prototype.click = origClick; } catch (eR1) {}
+					try { window.showOpenFilePicker = origPicker; } catch (eR2) {}
+					if (!injected) {
+						// The item may not have called input.click(); fall back to
+						// injecting into the input whose accept matches the kind.
+						// A document input accepts "*" (all files) or an
+						// application/* type; the sticker input's "image/*" must
+						// not match, or a document would be sent as a sticker.
+						var els = document.querySelectorAll('input[type="file"]');
+						for (var m = 0; m < els.length; m++) {
+							var a2 = (els[m].getAttribute('accept') || '').toLowerCase();
+							var isDocA = a2 === '*' || a2.indexOf('*/*') !== -1 || a2.indexOf('application/') !== -1;
+							if (wantDoc ? isDocA : (a2.indexOf('image') !== -1 && a2.indexOf('video') !== -1)) {
+								try { injectInto(els[m]); injected = true; } catch (eF) {}
+								break;
+							}
+						}
+					}
+					pollSend(resolve, (wantDoc ? 'document' : 'media') + ':menu=' + itemHit + ' hits=' + hits.join(',') + ' injected=' + injected + ' waited=' + waited);
+				}, jit(itemMs));
+			}
+			setTimeout(tryItem, jit(openMs));
+		});
 	};
 
 	AGENT.export_chat = function (args) {
