@@ -598,7 +598,7 @@ func mcpTools() []map[string]any {
 		},
 		{
 			"name":        "list_chats",
-			"description": "List the chats visible in the chat list, with name, last-message preview, and unread count.",
+			"description": "List the chats visible in the chat list, with name, last-message preview, unread count, and the contact's phone number (empty for groups).",
 			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
 		},
 		{
@@ -614,7 +614,7 @@ func mcpTools() []map[string]any {
 		},
 		{
 			"name":        "read_messages",
-			"description": "Read the messages of the currently open conversation.",
+			"description": "Read the messages of the currently open conversation, plus a chat object with the contact's name, phone number, and is_saved/is_group flags (phone and is_saved are false/empty for groups).",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -624,7 +624,7 @@ func mcpTools() []map[string]any {
 		},
 		{
 			"name":        "conversation_summary",
-			"description": "Summarize the open conversation for reply decisions: last message, whether the last message is incoming (should_reply), incoming vs outgoing counts, and the full message list as context.",
+			"description": "Summarize the open conversation for reply decisions: the chat object (contact name, phone, is_saved/is_group), last message, whether the last message is incoming (should_reply), incoming vs outgoing counts, and the full message list as context.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

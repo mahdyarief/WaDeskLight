@@ -117,17 +117,12 @@ func pollIncoming(w webview2.WebView, seen map[string]int, primed bool) bool {
 		return primed
 	}
 	var res struct {
-		Chats []struct {
-			ID      string `json:"id"`
-			Name    string `json:"name"`
-			Preview string `json:"preview"`
-			Avatar  string `json:"avatar"`
-			Unread  int    `json:"unread"`
-		} `json:"chats"`
+		Chats []chatRow `json:"chats"`
 	}
 	if err := json.Unmarshal([]byte(val), &res); err != nil {
 		return primed
 	}
+	keys := chatRowKeys(res.Chats)
 	// First poll only records the baseline so messages that were already
 	// unread before launch are not replayed. Wait for a real chat list before
 	// priming, otherwise an empty list while the page loads would make every
@@ -136,14 +131,14 @@ func pollIncoming(w webview2.WebView, seen map[string]int, primed bool) bool {
 		if len(res.Chats) == 0 {
 			return false
 		}
-		for _, c := range res.Chats {
-			seen[chatKey(c.ID, c.Name, c.Avatar)] = c.Unread
+		for i, c := range res.Chats {
+			seen[keys[i]] = c.Unread
 		}
 		return true
 	}
 	now := time.Now()
-	for _, c := range res.Chats {
-		key := chatKey(c.ID, c.Name, c.Avatar)
+	for i, c := range res.Chats {
+		key := keys[i]
 		prev, ok := seen[key]
 		if !ok {
 			// A chat that was not visible before (or was unread 0) now has a
@@ -157,6 +152,7 @@ func pollIncoming(w webview2.WebView, seen map[string]int, primed bool) bool {
 				"profile": gProfileID,
 				"service": gServiceBadge,
 				"chat":    c.Name,
+				"phone":   c.Phone,
 				"text":    c.Preview,
 				"unread":  c.Unread,
 				"time":    now.Format("15:04"),
@@ -168,6 +164,34 @@ func pollIncoming(w webview2.WebView, seen map[string]int, primed bool) bool {
 	// DOM list, not read — keep its last unread count so it does not refire the
 	// same event when it scrolls back in.
 	return true
+}
+
+// chatRow is one row of the agent's incoming_events payload.
+type chatRow struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Preview string `json:"preview"`
+	Phone   string `json:"phone"`
+	Avatar  string `json:"avatar"`
+	Unread  int    `json:"unread"`
+}
+
+// chatRowKeys returns one stable key per row: the chatKey of the row, with an
+// occurrence index appended when two rows still collide (e.g. two communities
+// each exposing a "General" subgroup, both with no avatar). Without the suffix
+// those rows share a single slot in the watcher's seen map, so their unread
+// counts overwrite each other and the larger one looks like a fresh increase
+// on every poll — refiring the webhook while it sits unread. Order of
+// appearance is stable between polls, so a colliding row keeps its key.
+func chatRowKeys(rows []chatRow) []string {
+	keys := make([]string, len(rows))
+	counts := map[string]int{}
+	for i, c := range rows {
+		base := chatKey(c.ID, c.Name, c.Avatar)
+		keys[i] = fmt.Sprintf("%s#%d", base, counts[base])
+		counts[base]++
+	}
+	return keys
 }
 
 // chatKey returns the stable identity for a chat row: the DOM data-id when the

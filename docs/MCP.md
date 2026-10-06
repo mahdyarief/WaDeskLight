@@ -77,10 +77,10 @@ cat "$APPDATA/WaGramDeskLite/mcp.json"
 | Tool | Arguments | Returns |
 |---|---|---|
 | `app_status` | none | Account name, service badge, and the page's `service` / `ready` / `title` |
-| `list_chats` | none | Visible chats with `name`, `preview`, `unread`, `active` |
+| `list_chats` | none | Visible chats with `name`, `preview`, `unread`, `phone` (contact number when the contact is not saved, empty otherwise), `active` |
 | `open_chat` | `name` (string, required) | Opens the matching chat, so `read_messages` and `send_message` target it |
-| `read_messages` | `limit` (integer, default 50) | Recent messages of the open conversation: `text`, `time`, `outgoing` |
-| `conversation_summary` | `limit` (integer, default 50) | Reply-decision data for the open conversation: `total`, `incoming_count`, `outgoing_count`, `last_message`, `should_reply` (true when the last message is incoming), plus the full `messages` list |
+| `read_messages` | `limit` (integer, default 50) | Recent messages of the open conversation (`text`, `time`, `outgoing`) plus a `chat` object with the contact's `name`, `phone`, `is_saved`, `is_group` |
+| `conversation_summary` | `limit` (integer, default 50) | Reply-decision data for the open conversation: the `chat` object (with `phone`, `is_saved`, `is_group`), `total`, `incoming_count`, `outgoing_count`, `last_message`, `should_reply` (true when the last message is incoming), plus the full `messages` list |
 | `send_message` | `text` (string, required) | Sends `text` in the open conversation |
 | `export_chat` | `limit` (integer) | Same shape as `read_messages`, intended for export |
 
@@ -132,6 +132,7 @@ baseline and are *not* replayed.
   "profile": "default",
   "service": "WA",
   "chat": "Contact Name",
+  "phone": "6281234567890",
   "text": "ok",
   "unread": 1,
   "time": "21:43"
@@ -144,7 +145,8 @@ baseline and are *not* replayed.
 | `account` / `profile` | Which account the message arrived in |
 | `service` | Service badge shown in the window (`WA` for WhatsApp) |
 | `chat` | Display name of the chat |
-| `text` | Preview (newest message) of the chat |
+| `phone` | Contact number as digits (`62812...`) when the chat row shows it — i.e. for an **unsaved** contact, whose display name *is* the number. Empty for saved contacts (the list row only shows their name) and for groups |
+| `text` | Preview (newest message) of the chat, with the unread badge stripped |
 | `unread` | Total unread count for that chat after the event |
 | `time` | Local time the event was detected (`HH:MM`) |
 
@@ -167,8 +169,10 @@ deleting the file and restarting the app.
 
 The watcher keeps its own unread baseline per chat. To tell chats apart it
 uses the DOM `data-id` when the page exposes one, otherwise a composite of the
-display name and the avatar URL. This keeps two chats that share a display
-name (duplicate group names) from clobbering each other's state.
+display name and the avatar URL. When even that collides — two communities
+each exposing a "General" subgroup with no avatar — the rows are disambiguated
+by their order of appearance in the list, so they do not clobber each other's
+baseline and refire the same event every poll.
 
 ### Example receiver
 

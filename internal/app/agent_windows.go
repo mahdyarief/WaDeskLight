@@ -121,6 +121,28 @@ const agentScript = `
 			.replace(/^[\s\uFE0E\uFE0F]+/, '')
 			.replace(/[\s\uFE0E\uFE0F]+$/, '');
 	}
+	// The row's secondary cell packs the last-message preview together with the
+// unread badge and the mute/read/media status icons. Those icons are drawn as
+// ligatures ("ic-image", "ic-notifications-off", "wds-ic-read") whose text the
+// cell's textContent picks up, running them into the preview. Clone the cell,
+// drop the unread badge, and drop any element whose whole text is such a
+// ligature, so only the real message text is left.
+	function previewText(prevEl) {
+		if (!prevEl) { return ''; }
+		var clone = prevEl.cloneNode(true);
+		var badges = clone.querySelectorAll('[data-testid="icon-unread-count"], .unread, .badge');
+		for (var i = 0; i < badges.length; i++) {
+			if (badges[i].parentNode) { badges[i].parentNode.removeChild(badges[i]); }
+		}
+		var els = clone.querySelectorAll('*');
+		for (var j = els.length - 1; j >= 0; j--) {
+			var t = (els[j].textContent || '').trim();
+			if (/^(?:wds-)?ic-[a-z0-9-]+$/i.test(t) && els[j].parentNode) {
+				els[j].parentNode.removeChild(els[j]);
+			}
+		}
+		return stripUnread(txt(clone)).replace(/\s+/g, ' ').trim();
+	}
 	// WhatsApp selects a chat on pointer/mouse-down, not on a bare click, so a
 	// synthetic click() alone is ignored. Dispatch the whole sequence and let
 	// it bubble to the row's handler.
@@ -303,11 +325,13 @@ const agentScript = `
 				if (idNode) { idAttr = idNode.getAttribute('data-id'); }
 			}
 			var av = r.querySelector('img');
+			var name = stripUnread(txt(nameEl));
 			out.push({
-				name: stripUnread(txt(nameEl)),
-				preview: txt(prevEl),
+				name: name,
+				preview: previewText(prevEl),
 				unread: txt(unreadEl),
 				id: idAttr || '',
+				phone: phoneFromText(name),
 				avatar: av ? av.getAttribute('data-plain-text') || av.src || '' : '',
 				active: r.getAttribute('aria-selected') === 'true' || ('' + r.className).indexOf('active') !== -1
 			});
@@ -327,6 +351,7 @@ const agentScript = `
 				id: chats[i].id || '',
 				name: chats[i].name,
 				preview: chats[i].preview,
+				phone: chats[i].phone || '',
 				avatar: chats[i].avatar || '',
 				unread: parseInt(chats[i].unread, 10) || 0
 			});
@@ -448,6 +473,86 @@ const agentScript = `
 		return out;
 	}
 
+	// WhatsApp does not expose a chat's JID in the DOM: there is no data-id
+	// anywhere in this build, and window.Store is not reachable. The phone
+	// number is only present as visible text. For an unsaved contact the chat
+	// title is the raw number; for a saved contact it lives in the Contact
+	// info drawer, which we must open, read and close.
+	//
+	// phoneFromText reduces a rendered number ("+62 812-2681-5608") to digits
+	// ("6281226815608"); '' when the text is not a phone number.
+	function phoneFromText(t) {
+		var m = ('' + (t || '')).match(/\+?\d[\d\s()\-]{7,}/);
+		if (!m) { return ''; }
+		var d = m[0].replace(/[^0-9]/g, '');
+		return d.length >= 8 ? d : '';
+	}
+
+	// Read the currently open Contact info drawer: whether it is a group, and
+	// the individual contact's phone number. A group drawer lists member
+	// numbers an individual already has, so a group never yields a phone.
+	function drawerInfo() {
+		var drawer = q('[data-testid="chat-info-drawer"]');
+		if (!drawer) { return { open: false, group: false, phone: '' }; }
+		var group = !!drawer.querySelector('[data-testid="group-info-header"]');
+		var phone = '';
+		if (!group) {
+			var els = drawer.querySelectorAll('*');
+			for (var i = 0; i < els.length; i++) {
+				if (els[i].childElementCount > 0) { continue; }
+				var p = phoneFromText((els[i].textContent || '').trim());
+				if (p) { phone = p; break; }
+			}
+		}
+		return { open: true, group: group, phone: phone };
+	}
+
+	// Identify the open conversation from the header title. An unsaved
+	// contact's title is the raw number, so is_saved starts false (tentative);
+	// a saved contact's title is a name, and the Contact info drawer then
+	// confirms it (and rules out a group).
+	function currentChat() {
+		var titleEl = q('[data-testid="conversation-info-header-chat-title"]');
+		var name = titleEl ? txt(titleEl) : '';
+		return { name: name, phone: phoneFromText(name), is_saved: false, is_group: false };
+	}
+
+	// name -> {phone, is_group, is_saved} once the drawer has been read, so a
+	// repeat read of the same chat does not reopen the drawer.
+	var chatInfoCache = {};
+
+	// Resolve the open chat with its phone number, saved flag and group flag,
+	// then call cb(chat). Number from the title for an unsaved contact;
+	// otherwise the Contact info drawer is opened, read and closed (once per
+	// chat). is_saved is only asserted once the drawer confirms a non-group.
+	function chatWithPhone(cb) {
+		var chat = currentChat();
+		if (!chat.name) { cb(chat); return; }
+		if (chat.phone) { cb(chat); return; }
+		var cached = chatInfoCache[chat.name];
+		if (cached) {
+			chat.phone = cached.phone;
+			chat.is_group = cached.is_group;
+			chat.is_saved = cached.is_saved;
+			cb(chat);
+			return;
+		}
+		var hdr = q('[data-testid="conversation-info-header"]') || q('#main header');
+		var btn = hdr ? (hdr.closest('[role="button"]') || hdr.querySelector('[role="button"]') || hdr) : null;
+		if (!btn) { cb(chat); return; }
+		try { btn.click(); } catch (e) {}
+		setTimeout(function () {
+			var info = drawerInfo();
+			var closer = info.open ? (q('[data-testid="chat-info-drawer"]') || document).querySelector('[aria-label="Close"]') : null;
+			if (closer) { try { closer.click(); } catch (e) {} }
+			chat.is_group = info.group;
+			chat.is_saved = info.open && !info.group;
+			chat.phone = info.phone;
+			chatInfoCache[chat.name] = { phone: chat.phone, is_group: chat.is_group, is_saved: chat.is_saved };
+			cb(chat);
+		}, 750);
+	}
+
 	// Read the open conversation. WhatsApp keeps only a window of message rows
 	// in the DOM, so when the caller wants more than is rendered we scroll the
 	// pane toward the top, accumulating rows until we have enough or run out.
@@ -455,7 +560,10 @@ const agentScript = `
 		var limit = (args && args.limit) ? args.limit : 50;
 		var scroller = messageScroller();
 		if (!scroller) {
-			return { messages: collectMessages(messageRows(), limit) };
+			return new Promise(function (resolve) {
+				var msgs = collectMessages(messageRows(), limit);
+				chatWithPhone(function (chat) { resolve({ messages: msgs, chat: chat }); });
+			});
 		}
 		return new Promise(function (resolve) {
 			var seen = {};
@@ -471,7 +579,8 @@ const agentScript = `
 			function finish() {
 				try { scroller.scrollTop = scroller.scrollHeight; } catch (e) {}
 				acc.reverse();
-				resolve({ messages: collectMessages(acc, limit) });
+				var msgs = collectMessages(acc, limit);
+				chatWithPhone(function (chat) { resolve({ messages: msgs, chat: chat }); });
 			}
 			// Bound the loop by wall-clock time, not step count, so a busy page
 			// (each setTimeout delayed) can never push us past the RPC timeout.
@@ -499,7 +608,7 @@ const agentScript = `
 	AGENT.conversation_summary = function (args) {
 		var limit = (args && args.limit) ? args.limit : 50;
 		var r = AGENT.read_messages({ limit: limit });
-		function summarize(msgs) {
+		function summarize(msgs, chat) {
 			msgs = msgs || [];
 			var incoming = 0, outgoing = 0;
 			for (var i = 0; i < msgs.length; i++) {
@@ -507,6 +616,7 @@ const agentScript = `
 			}
 			var last = msgs.length ? msgs[msgs.length - 1] : null;
 			return {
+				chat: chat || currentChat(),
 				total: msgs.length,
 				incoming_count: incoming,
 				outgoing_count: outgoing,
@@ -516,9 +626,9 @@ const agentScript = `
 			};
 		}
 		if (r && typeof r.then === 'function') {
-			return r.then(function (v) { return summarize((v && v.messages) || []); });
+			return r.then(function (v) { return summarize((v && v.messages) || [], (v && v.chat) || null); });
 		}
-		return summarize((r && r.messages) || []);
+		return summarize((r && r.messages) || [], (r && r.chat) || null);
 	};
 
 	// Give React a tick to register the typed text (and enable the send
